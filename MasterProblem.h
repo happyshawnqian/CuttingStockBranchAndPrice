@@ -12,6 +12,7 @@ private:
 	IloObjective _RollsUsed;
 	IloRangeArray _Fill;
 	IloNumVarArray _Cut;
+	IloNumVarArray _Artificial;
 	IloCplex _cutSolver;
 	bool _integerConverted;
 
@@ -24,12 +25,17 @@ public:
 	MasterProblem& operator=(const MasterProblem&) = delete;
 
 	void initialize();
+	void addArtificialColumns(double cost);
 	void addColumn(Pattern* pattern);	// add one column
+	void addColumn(Pattern* pattern, double lowerBound, double upperBound);
 	void addColumns(const vector<Pattern* >& patterns);	// add many columns
-	void solve();
+	bool solve();
 	vector<double> getDuals();
+	vector<double> getValues();
+	double getObjectiveValue();
+	double getArtificialUsage();
 	void report();
-	void solveIP();
+	bool solveIP();
 	void reportIP();
 
 };

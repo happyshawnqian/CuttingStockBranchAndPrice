@@ -23,8 +23,11 @@ public:
 	Subproblem& operator=(const Subproblem&) = delete;
 
 	void initialize();	// create variables and constraint, note that objective is not set
+	void addExcludedPattern(Pattern* pattern);
+	void addExcludedPatterns(const vector<Pattern* >& patterns);
 	void setObjective(const vector<double>& duals);	// get duals from master problem, and set objective
-	void solve();
+	bool solve();
+	bool solve(bool reportFailure);
 	Pattern* getPattern();	// get the newly generated pattern
 	double getReducedCost();
 	void report();

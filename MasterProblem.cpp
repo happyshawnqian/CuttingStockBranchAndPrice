@@ -7,6 +7,7 @@ MasterProblem::MasterProblem() : Problem()
 	_RollsUsed = IloAdd(_cutOpt, IloMinimize(_env));
 	_Fill = IloRangeArray(_env);
 	_Cut = IloNumVarArray(_env);
+	_Artificial = IloNumVarArray(_env);
 	_cutSolver = IloCplex(_cutOpt);
 	_integerConverted = false;
 }
@@ -17,6 +18,7 @@ MasterProblem::MasterProblem(const vector<PaperRoll* >& materials, const vector<
 	_RollsUsed = IloAdd(_cutOpt, IloMinimize(_env));
 	_Fill = IloRangeArray(_env);
 	_Cut = IloNumVarArray(_env);
+	_Artificial = IloNumVarArray(_env);
 	_cutSolver = IloCplex(_cutOpt);
 	_integerConverted = false;
 }
@@ -46,7 +48,26 @@ void MasterProblem::initialize()
 	_cutOpt.add(_Fill);	// add constraints to model
 }
 
+void MasterProblem::addArtificialColumns(double cost)
+{
+	for (int i = 0; i < _Fill.getSize(); i++)
+	{
+		IloNumColumn col(_env);
+		col += _RollsUsed(cost);
+		col += _Fill[i](1);
+
+		string varName = "artificial_" + to_string(i);
+		_Artificial.add(IloNumVar(col, 0, IloInfinity, ILOFLOAT, varName.c_str()));
+		col.end();
+	}
+}
+
 void MasterProblem::addColumn(Pattern* pattern)
+{
+	addColumn(pattern, 0, IloInfinity);
+}
+
+void MasterProblem::addColumn(Pattern* pattern, double lowerBound, double upperBound)
 {
 	// prepare column expression
 	IloNumColumn col(_env);
@@ -57,7 +78,7 @@ void MasterProblem::addColumn(Pattern* pattern)
 	}
 
 	string varName = "x_" + to_string(pattern->getId());
-	_Cut.add(IloNumVar(col, 0, IloInfinity, ILOFLOAT, varName.c_str()));
+	_Cut.add(IloNumVar(col, lowerBound, upperBound, ILOFLOAT, varName.c_str()));
 	col.end();
 }
 
@@ -69,14 +90,15 @@ void MasterProblem::addColumns(const vector<Pattern* >& patterns)
 	}
 }
 
-void MasterProblem::solve()
+bool MasterProblem::solve()
 {
 	//_cutSolver.exportModel("masterProblem.lp");
 	if (!_cutSolver.solve())
 	{
 		cout << "Error, master problem could not be solved" << endl;
-		exit(1);
+		return false;
 	}
+	return true;
 }
 
 vector<double> MasterProblem::getDuals()
@@ -87,6 +109,31 @@ vector<double> MasterProblem::getDuals()
 		duals.push_back(_cutSolver.getDual(_Fill[i]));
 	}
 	return duals;
+}
+
+vector<double> MasterProblem::getValues()
+{
+	vector<double> values;
+	for (int j = 0; j < _Cut.getSize(); j++)
+	{
+		values.push_back(_cutSolver.getValue(_Cut[j]));
+	}
+	return values;
+}
+
+double MasterProblem::getObjectiveValue()
+{
+	return _cutSolver.getObjValue();
+}
+
+double MasterProblem::getArtificialUsage()
+{
+	double usage = 0;
+	for (int j = 0; j < _Artificial.getSize(); j++)
+	{
+		usage += _cutSolver.getValue(_Artificial[j]);
+	}
+	return usage;
 }
 
 void MasterProblem::report()
@@ -106,7 +153,7 @@ void MasterProblem::report()
 	cout << endl;
 }
 
-void MasterProblem::solveIP()
+bool MasterProblem::solveIP()
 {
 	if (!_integerConverted)
 	{
@@ -116,8 +163,9 @@ void MasterProblem::solveIP()
 	if (!_cutSolver.solve())
 	{
 		cout << "Error, integer master problem could not be solved" << endl;
-		exit(1);
+		return false;
 	}
+	return true;
 }
 
 void MasterProblem::reportIP()

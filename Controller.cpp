@@ -1,5 +1,7 @@
 #include "Controller.h"
 #include <cstdlib>
+#include <cmath>
+#include <sstream>
 
 Controller::Controller()
 {
@@ -9,6 +11,9 @@ Controller::Controller()
 	_ownsProblem = true;
 	_ownsMaterials = false;
 	_ownsProducts = false;
+	_bestObjective = 1.0e100;
+	_processedBranchAndPriceNodes = 0;
+	_maxBranchAndPriceNodes = 1000;
 }
 
 Controller::Controller(Problem* problem)
@@ -19,6 +24,9 @@ Controller::Controller(Problem* problem)
 	_ownsProblem = false;
 	_ownsMaterials = false;
 	_ownsProducts = false;
+	_bestObjective = 1.0e100;
+	_processedBranchAndPriceNodes = 0;
+	_maxBranchAndPriceNodes = 1000;
 
 	syncProblemToSolvers();
 }
@@ -177,6 +185,247 @@ void Controller::validateProblemReady()
 	}
 }
 
+string Controller::getPatternSignature(Pattern* pattern)
+{
+	int nWdth = 0;
+	if (_problem != nullptr)
+	{
+		nWdth = static_cast<int>(_problem->getProducts().size());
+	}
+
+	vector<int> counts(nWdth, 0);
+	if (pattern != nullptr)
+	{
+		for (auto content : pattern->getContent())
+		{
+			if (content.first >= 0 && content.first < nWdth)
+			{
+				counts[content.first] += content.second;
+			}
+		}
+	}
+
+	ostringstream signature;
+	for (int i = 0; i < nWdth; i++)
+	{
+		if (i > 0) signature << ",";
+		signature << counts[i];
+	}
+	return signature.str();
+}
+
+bool Controller::isKnownPattern(Pattern* pattern)
+{
+	string signature = getPatternSignature(pattern);
+	for (auto knownPattern : _patterns)
+	{
+		if (getPatternSignature(knownPattern) == signature)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+bool Controller::getPatternBounds(const BranchNode& node, Pattern* pattern, double& lowerBound, double& upperBound)
+{
+	string signature = getPatternSignature(pattern);
+	int lower = 0;
+	int upper = -1;
+
+	for (auto bound : node.bounds)
+	{
+		if (bound.signature == signature)
+		{
+			if (bound.lowerBound > lower)
+			{
+				lower = bound.lowerBound;
+			}
+			if (bound.upperBound >= 0 && (upper < 0 || bound.upperBound < upper))
+			{
+				upper = bound.upperBound;
+			}
+		}
+	}
+
+	if (upper >= 0 && lower > upper)
+	{
+		return false;
+	}
+
+	lowerBound = lower;
+	upperBound = upper >= 0 ? upper : IloInfinity;
+	return true;
+}
+
+void Controller::addBranchBound(BranchNode& node, const string& signature, int lowerBound, int upperBound)
+{
+	PatternBound bound;
+	bound.signature = signature;
+	bound.lowerBound = lowerBound;
+	bound.upperBound = upperBound;
+	node.bounds.push_back(bound);
+}
+
+bool Controller::solveColumnGenerationAtNode(const BranchNode& node, vector<double>& values, double& objective)
+{
+	MasterProblem master;
+	master.setMaterials(_problem->getMaterials());
+	master.setProducts(_problem->getProducts());
+	master.initialize();
+	master.addArtificialColumns(1000000);
+
+	for (auto pattern : _patterns)
+	{
+		double lowerBound = 0;
+		double upperBound = IloInfinity;
+		if (!getPatternBounds(node, pattern, lowerBound, upperBound))
+		{
+			return false;
+		}
+		master.addColumn(pattern, lowerBound, upperBound);
+	}
+
+	Subproblem subproblem;
+	subproblem.setMaterials(_problem->getMaterials());
+	subproblem.setProducts(_problem->getProducts());
+	subproblem.initialize();
+	subproblem.addExcludedPatterns(_patterns);
+
+	while (true)
+	{
+		if (!master.solve())
+		{
+			return false;
+		}
+
+		vector<double> duals = master.getDuals();
+		subproblem.setObjective(duals);
+		if (!subproblem.solve(false))
+		{
+			break;
+		}
+
+		if (subproblem.getReducedCost() > -Utility::RC_EPS)
+		{
+			break;
+		}
+
+		Pattern* newPattern = subproblem.getPattern();
+		if (isKnownPattern(newPattern))
+		{
+			subproblem.addExcludedPattern(newPattern);
+			delete newPattern;
+			continue;
+		}
+
+		_patterns.push_back(newPattern);
+		double lowerBound = 0;
+		double upperBound = IloInfinity;
+		if (!getPatternBounds(node, newPattern, lowerBound, upperBound))
+		{
+			return false;
+		}
+		master.addColumn(newPattern, lowerBound, upperBound);
+		subproblem.addExcludedPattern(newPattern);
+	}
+
+	values = master.getValues();
+	objective = master.getObjectiveValue();
+	if (master.getArtificialUsage() > Utility::RC_EPS)
+	{
+		return false;
+	}
+
+	return true;
+}
+
+int Controller::findFractionalPatternIndex(const vector<double>& values)
+{
+	for (int i = 0; i < static_cast<int>(values.size()); i++)
+	{
+		double rounded = floor(values[i] + 0.5);
+		if (fabs(values[i] - rounded) > Utility::RC_EPS)
+		{
+			return i;
+		}
+	}
+	return -1;
+}
+
+void Controller::solveBranchAndPriceNode(const BranchNode& node)
+{
+	if (_processedBranchAndPriceNodes >= _maxBranchAndPriceNodes)
+	{
+		return;
+	}
+	_processedBranchAndPriceNodes++;
+
+	vector<double> values;
+	double objective = 0;
+	if (!solveColumnGenerationAtNode(node, values, objective))
+	{
+		return;
+	}
+	if (objective >= _bestObjective - Utility::RC_EPS)
+	{
+		return;
+	}
+
+	int branchIndex = findFractionalPatternIndex(values);
+	if (branchIndex < 0)
+	{
+		_bestObjective = objective;
+		_bestSolution = values;
+		cout << "New incumbent uses " << _bestObjective << " rolls at node "
+			<< _processedBranchAndPriceNodes << endl;
+		return;
+	}
+
+	double value = values[branchIndex];
+	int floorValue = static_cast<int>(floor(value));
+	int ceilValue = floorValue + 1;
+	string signature = getPatternSignature(_patterns[branchIndex]);
+
+	BranchNode downBranch = node;
+	downBranch.depth = node.depth + 1;
+	addBranchBound(downBranch, signature, 0, floorValue);
+
+	BranchNode upBranch = node;
+	upBranch.depth = node.depth + 1;
+	addBranchBound(upBranch, signature, ceilValue, -1);
+
+	solveBranchAndPriceNode(upBranch);
+	solveBranchAndPriceNode(downBranch);
+}
+
+void Controller::reportBranchAndPriceSolution()
+{
+	cout << endl;
+	if (_bestSolution.empty())
+	{
+		cout << "No integer solution found by branch-and-price" << endl;
+	}
+	else
+	{
+		cout << "Best branch-and-price solution uses " << _bestObjective << " rolls" << endl;
+		for (int i = 0; i < static_cast<int>(_bestSolution.size()) && i < static_cast<int>(_patterns.size()); i++)
+		{
+			int value = static_cast<int>(floor(_bestSolution[i] + 0.5));
+			if (value > 0)
+			{
+				cout << "  Pattern " << _patterns[i]->getId() << " = " << value << endl;
+			}
+		}
+	}
+	cout << "Processed " << _processedBranchAndPriceNodes << " branch-and-price nodes" << endl;
+	if (_processedBranchAndPriceNodes >= _maxBranchAndPriceNodes)
+	{
+		cout << "Warning, branch-and-price stopped at the node limit" << endl;
+	}
+	cout << endl;
+}
+
 void Controller::loadMaterials(string dataDir)
 {
 	Json::Reader reader;
@@ -278,12 +527,18 @@ void Controller::solveCG()
 		cout << "--------------------------------------------- " << endl;
 		cout << "Iteration " << iter << endl;
 
-		_masterProblem->solve();
+		if (!_masterProblem->solve())
+		{
+			exit(1);
+		}
 		_masterProblem->report();
 		vector<double> duals = _masterProblem->getDuals();
 
 		_subproblem->setObjective(duals);
-		_subproblem->solve();
+		if (!_subproblem->solve())
+		{
+			exit(1);
+		}
 		_subproblem->report();
 
 		if (_subproblem->getReducedCost() > -Utility::RC_EPS) break;
@@ -325,6 +580,39 @@ void Controller::solveIP()
 		cout << "Error, solveCG must generate columns before solveIP" << endl;
 		exit(1);
 	}
-	_masterProblem->solveIP();
+	if (!_masterProblem->solveIP())
+	{
+		exit(1);
+	}
 	_masterProblem->reportIP();
+}
+
+void Controller::solveBP()
+{
+	validateProblemReady();
+	clearPatterns();
+	resetSolvers();
+	syncProblemToSolvers();
+
+	_bestObjective = 1.0e100;
+	_bestSolution.clear();
+	_processedBranchAndPriceNodes = 0;
+
+	vector<Pattern* > initialPatterns = findInitialPatterns();
+	for (auto pattern : initialPatterns)
+	{
+		if (isKnownPattern(pattern))
+		{
+			delete pattern;
+		}
+		else
+		{
+			_patterns.push_back(pattern);
+		}
+	}
+
+	BranchNode root;
+	root.depth = 0;
+	solveBranchAndPriceNode(root);
+	reportBranchAndPriceSolution();
 }

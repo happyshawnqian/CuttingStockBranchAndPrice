@@ -12,8 +12,7 @@ int main(int argc, char** argv)
 	controller.loadProducts(inputDataDir);
 	controller.loadMaterials(inputDataDir);
 
-	controller.solveCG();
-	controller.solveIP();
+	controller.solveBP();
 
 	system("pause");
 }

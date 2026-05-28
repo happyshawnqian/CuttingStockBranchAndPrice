@@ -44,6 +44,43 @@ void Subproblem::initialize()
 	_patGen.add(_Width);
 }
 
+void Subproblem::addExcludedPattern(Pattern* pattern)
+{
+	if (pattern == nullptr || _materials.empty() || _products.empty()) return;
+
+	int nWdth = static_cast<int>(_products.size());
+	int rollWidth = _materials[0]->getWidth();
+	vector<int> target(nWdth, 0);
+	for (auto content : pattern->getContent())
+	{
+		if (content.first >= 0 && content.first < nWdth)
+		{
+			target[content.first] += content.second;
+		}
+	}
+
+	IloExpr differs(_env);
+	for (int i = 0; i < nWdth; i++)
+	{
+		int maxUse = rollWidth / _products[i]->getWidth();
+		string varName = "diff_" + to_string(pattern->getId()) + "_" + to_string(i);
+		IloBoolVar diff(_env, varName.c_str());
+		differs += diff;
+		_patGen.add(_Use[i] - target[i] <= maxUse * diff);
+		_patGen.add(target[i] - _Use[i] <= maxUse * diff);
+	}
+	_patGen.add(differs >= 1);
+	differs.end();
+}
+
+void Subproblem::addExcludedPatterns(const vector<Pattern* >& patterns)
+{
+	for (auto pattern : patterns)
+	{
+		addExcludedPattern(pattern);
+	}
+}
+
 void Subproblem::setObjective(const vector<double>& duals)
 {
 	int nWdth = static_cast<int>(_products.size());
@@ -62,14 +99,23 @@ void Subproblem::setObjective(const vector<double>& duals)
 	objExp.end();
 }
 
-void Subproblem::solve()
+bool Subproblem::solve()
+{
+	return solve(true);
+}
+
+bool Subproblem::solve(bool reportFailure)
 {
 	//_patSolver.exportModel("subproblem.lp");
 	if (!_patSolver.solve())
 	{
-		cout << "Error, subproblem could not be solved" << endl;
-		exit(1);
+		if (reportFailure)
+		{
+			cout << "Error, subproblem could not be solved" << endl;
+		}
+		return false;
 	}
+	return true;
 }
 
 Pattern* Subproblem::getPattern()
