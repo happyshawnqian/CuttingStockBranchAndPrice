@@ -1,0 +1,69 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;hm;inl;inc;xsd</Extensions>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="Domain">
+      <UniqueIdentifier>{33552096-2898-48e6-9ae7-5f3e36f23964}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Controller">
+      <UniqueIdentifier>{919f59f3-ad7e-4e6a-8a9b-0e27a018b4e5}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="main.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PaperRoll.cpp">
+      <Filter>Domain</Filter>
+    </ClCompile>
+    <ClCompile Include="Pattern.cpp">
+      <Filter>Domain</Filter>
+    </ClCompile>
+    <ClCompile Include="Controller.cpp">
+      <Filter>Controller</Filter>
+    </ClCompile>
+    <ClCompile Include="MasterProblem.cpp">
+      <Filter>Controller</Filter>
+    </ClCompile>
+    <ClCompile Include="Subproblem.cpp">
+      <Filter>Controller</Filter>
+    </ClCompile>
+    <ClCompile Include="Utility.cpp">
+      <Filter>Controller</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="PaperRoll.h">
+      <Filter>Domain</Filter>
+    </ClInclude>
+    <ClInclude Include="Pattern.h">
+      <Filter>Domain</Filter>
+    </ClInclude>
+    <ClInclude Include="Controller.h">
+      <Filter>Controller</Filter>
+    </ClInclude>
+    <ClInclude Include="Problem.h">
+      <Filter>Controller</Filter>
+    </ClInclude>
+    <ClInclude Include="MasterProblem.h">
+      <Filter>Controller</Filter>
+    </ClInclude>
+    <ClInclude Include="Utility.h">
+      <Filter>Controller</Filter>
+    </ClInclude>
+    <ClInclude Include="Subproblem.h">
+      <Filter>Controller</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>
