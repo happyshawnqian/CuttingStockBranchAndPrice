@@ -205,8 +205,13 @@ string Controller::getPatternSignature(Pattern* pattern)
 		}
 	}
 
+	return getPatternSignature(counts);
+}
+
+string Controller::getPatternSignature(const vector<int>& counts)
+{
 	ostringstream signature;
-	for (int i = 0; i < nWdth; i++)
+	for (int i = 0; i < static_cast<int>(counts.size()); i++)
 	{
 		if (i > 0) signature << ",";
 		signature << counts[i];
@@ -216,7 +221,11 @@ string Controller::getPatternSignature(Pattern* pattern)
 
 bool Controller::isKnownPattern(Pattern* pattern)
 {
-	string signature = getPatternSignature(pattern);
+	return isKnownPatternSignature(getPatternSignature(pattern));
+}
+
+bool Controller::isKnownPatternSignature(const string& signature)
+{
 	for (auto knownPattern : _patterns)
 	{
 		if (getPatternSignature(knownPattern) == signature)
@@ -267,6 +276,71 @@ void Controller::addBranchBound(BranchNode& node, const string& signature, int l
 	node.bounds.push_back(bound);
 }
 
+void Controller::enumeratePricingPatterns(int productIndex, int remainingWidth, const vector<double>& duals,
+	vector<int>& counts, double& bestReducedCost, vector<int>& bestCounts)
+{
+	vector<PaperRoll* > products = _problem->getProducts();
+	if (productIndex == static_cast<int>(products.size()))
+	{
+		string signature = getPatternSignature(counts);
+		if (isKnownPatternSignature(signature))
+		{
+			return;
+		}
+
+		double reducedCost = _problem->getMaterials()[0]->getCost();
+		for (int i = 0; i < static_cast<int>(counts.size()); i++)
+		{
+			reducedCost -= duals[i] * counts[i];
+		}
+
+		if (reducedCost < bestReducedCost)
+		{
+			bestReducedCost = reducedCost;
+			bestCounts = counts;
+		}
+		return;
+	}
+
+	int width = products[productIndex]->getWidth();
+	int maxUse = remainingWidth / width;
+	for (int amount = 0; amount <= maxUse; amount++)
+	{
+		counts[productIndex] = amount;
+		enumeratePricingPatterns(productIndex + 1, remainingWidth - amount * width,
+			duals, counts, bestReducedCost, bestCounts);
+	}
+	counts[productIndex] = 0;
+}
+
+Pattern* Controller::findBestPricingPattern(const vector<double>& duals)
+{
+	vector<PaperRoll* > materials = _problem->getMaterials();
+	vector<PaperRoll* > products = _problem->getProducts();
+	vector<int> counts(products.size(), 0);
+	vector<int> bestCounts(products.size(), 0);
+	double bestReducedCost = 1.0e100;
+
+	enumeratePricingPatterns(0, materials[0]->getWidth(), duals, counts, bestReducedCost, bestCounts);
+	if (bestReducedCost > -Utility::RC_EPS)
+	{
+		return nullptr;
+	}
+
+	Pattern* pattern = new Pattern();
+	vector<pair<int, int>> content;
+	for (int i = 0; i < static_cast<int>(bestCounts.size()); i++)
+	{
+		if (bestCounts[i] > 0)
+		{
+			content.push_back(make_pair(i, bestCounts[i]));
+		}
+	}
+	pattern->setContent(content);
+	pattern->setCost(materials[0]->getCost());
+	return pattern;
+}
+
 bool Controller::solveColumnGenerationAtNode(const BranchNode& node, vector<double>& values, double& objective)
 {
 	MasterProblem master;
@@ -286,12 +360,6 @@ bool Controller::solveColumnGenerationAtNode(const BranchNode& node, vector<doub
 		master.addColumn(pattern, lowerBound, upperBound);
 	}
 
-	Subproblem subproblem;
-	subproblem.setMaterials(_problem->getMaterials());
-	subproblem.setProducts(_problem->getProducts());
-	subproblem.initialize();
-	subproblem.addExcludedPatterns(_patterns);
-
 	while (true)
 	{
 		if (!master.solve())
@@ -300,24 +368,8 @@ bool Controller::solveColumnGenerationAtNode(const BranchNode& node, vector<doub
 		}
 
 		vector<double> duals = master.getDuals();
-		subproblem.setObjective(duals);
-		if (!subproblem.solve(false))
-		{
-			break;
-		}
-
-		if (subproblem.getReducedCost() > -Utility::RC_EPS)
-		{
-			break;
-		}
-
-		Pattern* newPattern = subproblem.getPattern();
-		if (isKnownPattern(newPattern))
-		{
-			subproblem.addExcludedPattern(newPattern);
-			delete newPattern;
-			continue;
-		}
+		Pattern* newPattern = findBestPricingPattern(duals);
+		if (newPattern == nullptr) break;
 
 		_patterns.push_back(newPattern);
 		double lowerBound = 0;
@@ -327,7 +379,6 @@ bool Controller::solveColumnGenerationAtNode(const BranchNode& node, vector<doub
 			return false;
 		}
 		master.addColumn(newPattern, lowerBound, upperBound);
-		subproblem.addExcludedPattern(newPattern);
 	}
 
 	values = master.getValues();
@@ -367,6 +418,8 @@ void Controller::solveBranchAndPriceNode(const BranchNode& node)
 	{
 		return;
 	}
+	cout << "Node " << _processedBranchAndPriceNodes << ", depth " << node.depth
+		<< ", LP objective = " << objective << endl;
 	if (objective >= _bestObjective - Utility::RC_EPS)
 	{
 		return;

@@ -43,9 +43,14 @@ private:
 	void syncProblemToSolvers();
 	void validateProblemReady();
 	string getPatternSignature(Pattern* pattern);
+	string getPatternSignature(const vector<int>& counts);
 	bool isKnownPattern(Pattern* pattern);
+	bool isKnownPatternSignature(const string& signature);
 	bool getPatternBounds(const BranchNode& node, Pattern* pattern, double& lowerBound, double& upperBound);
 	void addBranchBound(BranchNode& node, const string& signature, int lowerBound, int upperBound);
+	void enumeratePricingPatterns(int productIndex, int remainingWidth, const vector<double>& duals,
+		vector<int>& counts, double& bestReducedCost, vector<int>& bestCounts);
+	Pattern* findBestPricingPattern(const vector<double>& duals);
 	bool solveColumnGenerationAtNode(const BranchNode& node, vector<double>& values, double& objective);
 	void solveBranchAndPriceNode(const BranchNode& node);
 	int findFractionalPatternIndex(const vector<double>& values);
