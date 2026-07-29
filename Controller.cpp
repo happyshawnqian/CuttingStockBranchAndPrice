@@ -5,6 +5,8 @@
 
 Controller::Controller()
 {
+	// Default construction creates an empty problem that this controller owns.
+	// Data loaded from JSON will be stored in this Problem instance.
 	_problem = new Problem();
 	_masterProblem = new MasterProblem();
 	_subproblem = new Subproblem();
@@ -18,6 +20,8 @@ Controller::Controller()
 
 Controller::Controller(Problem* problem)
 {
+	// External problems are borrowed. The controller synchronizes solver views
+	// with the supplied data but does not delete the Problem or its rolls.
 	_problem = problem;
 	_masterProblem = new MasterProblem();
 	_subproblem = new Subproblem();
@@ -33,6 +37,8 @@ Controller::Controller(Problem* problem)
 
 Controller::~Controller()
 {
+	// Clear owned column/data objects before destroying the solver wrappers.
+	// Solver wrappers only reference Problem data and must not delete it.
 	clearPatterns();
 	if (_ownsProducts) clearProducts(true);
 	if (_ownsMaterials) clearMaterials(true);
@@ -47,6 +53,8 @@ Controller::~Controller()
 
 void Controller::setProblem(Problem* problem)
 {
+	// Replacing the problem invalidates any generated columns and CPLEX models,
+	// because both are tied to the old product/material vectors.
 	clearPatterns();
 	if (_ownsProducts) clearProducts(true);
 	if (_ownsMaterials) clearMaterials(true);
@@ -65,6 +73,8 @@ void Controller::setProblem(Problem* problem)
 
 void Controller::syncProblemToSolvers()
 {
+	// Master and pricing models keep their own copies of the pointer vectors.
+	// The PaperRoll objects themselves are shared and owned elsewhere.
 	if (_problem != nullptr)
 	{
 		_masterProblem->setMaterials(_problem->getMaterials());
@@ -76,6 +86,8 @@ void Controller::syncProblemToSolvers()
 
 void Controller::resetSolvers()
 {
+	// Concert models are append-only in this codebase. Rebuilding the solver
+	// wrappers avoids stale rows, columns, bounds, and objective expressions.
 	delete _masterProblem;
 	delete _subproblem;
 
@@ -85,6 +97,9 @@ void Controller::resetSolvers()
 
 void Controller::clearMaterials(bool clearProblemVector)
 {
+	// clearProblemVector controls whether the Problem should forget the vector.
+	// When reloading JSON, the old owned objects are deleted but the Problem
+	// remains alive and receives a new vector immediately after this call.
 	if (_problem != nullptr)
 	{
 		vector<PaperRoll* > materials = _problem->getMaterials();
@@ -108,6 +123,8 @@ void Controller::clearMaterials(bool clearProblemVector)
 
 void Controller::clearProducts(bool clearProblemVector)
 {
+	// Products follow the same ownership policy as materials: delete only when
+	// they were loaded by this controller, never when supplied externally.
 	if (_problem != nullptr)
 	{
 		vector<PaperRoll* > products = _problem->getProducts();
@@ -140,6 +157,8 @@ void Controller::clearPatterns()
 
 void Controller::validateProblemReady()
 {
+	// The algorithms assume one material width and at least one product. Failing
+	// early here avoids out-of-range access and division by zero in pricing.
 	if (_problem == nullptr)
 	{
 		cout << "Error, problem is not set" << endl;
@@ -187,6 +206,8 @@ void Controller::validateProblemReady()
 
 string Controller::getPatternSignature(Pattern* pattern)
 {
+	// Convert sparse Pattern content into a dense count vector ordered by
+	// product index. This makes logically identical patterns compare equal.
 	int nWdth = 0;
 	if (_problem != nullptr)
 	{
@@ -210,6 +231,8 @@ string Controller::getPatternSignature(Pattern* pattern)
 
 string Controller::getPatternSignature(const vector<int>& counts)
 {
+	// A comma-separated vector is sufficient here because product counts are
+	// non-negative integers and product order is fixed by the input data.
 	ostringstream signature;
 	for (int i = 0; i < static_cast<int>(counts.size()); i++)
 	{
@@ -238,6 +261,9 @@ bool Controller::isKnownPatternSignature(const string& signature)
 
 bool Controller::getPatternBounds(const BranchNode& node, Pattern* pattern, double& lowerBound, double& upperBound)
 {
+	// A node can inherit multiple bounds for the same pattern. The effective
+	// lower bound is the maximum lower bound; the effective upper bound is the
+	// minimum finite upper bound.
 	string signature = getPatternSignature(pattern);
 	int lower = 0;
 	int upper = -1;
@@ -279,6 +305,10 @@ void Controller::addBranchBound(BranchNode& node, const string& signature, int l
 void Controller::enumeratePricingPatterns(int productIndex, int remainingWidth, const vector<double>& duals,
 	vector<int>& counts, double& bestReducedCost, vector<int>& bestCounts)
 {
+	// Depth-first enumeration of all feasible patterns for one raw roll.
+	// At the leaf, compute reduced cost:
+	//   c_p - sum_i dual_i * a_ip
+	// and keep the best non-duplicate pattern.
 	vector<PaperRoll* > products = _problem->getProducts();
 	if (productIndex == static_cast<int>(products.size()))
 	{
@@ -310,11 +340,13 @@ void Controller::enumeratePricingPatterns(int productIndex, int remainingWidth, 
 		enumeratePricingPatterns(productIndex + 1, remainingWidth - amount * width,
 			duals, counts, bestReducedCost, bestCounts);
 	}
-	counts[productIndex] = 0;
+	//counts[productIndex] = 0;
 }
 
 Pattern* Controller::findBestPricingPattern(const vector<double>& duals)
 {
+	// Return nullptr when no pattern has negative reduced cost. That condition
+	// means the current restricted master LP is optimal for the node.
 	vector<PaperRoll* > materials = _problem->getMaterials();
 	vector<PaperRoll* > products = _problem->getProducts();
 	vector<int> counts(products.size(), 0);
@@ -343,6 +375,10 @@ Pattern* Controller::findBestPricingPattern(const vector<double>& duals)
 
 bool Controller::solveColumnGenerationAtNode(const BranchNode& node, vector<double>& values, double& objective)
 {
+	// Build a fresh restricted master for this branch node. Existing global
+	// columns are inserted with the node-specific bounds inherited from the
+	// branch path, then pricing adds new columns until no negative reduced-cost
+	// pattern remains.
 	MasterProblem master;
 	master.setMaterials(_problem->getMaterials());
 	master.setProducts(_problem->getProducts());
@@ -362,6 +398,8 @@ bool Controller::solveColumnGenerationAtNode(const BranchNode& node, vector<doub
 
 	while (true)
 	{
+		// Solve the current LP relaxation, price a new pattern from the duals,
+		// and append it if it improves the node LP.
 		if (!master.solve())
 		{
 			return false;
@@ -385,6 +423,8 @@ bool Controller::solveColumnGenerationAtNode(const BranchNode& node, vector<doub
 	objective = master.getObjectiveValue();
 	if (master.getArtificialUsage() > Utility::RC_EPS)
 	{
+		// Artificial usage means real generated columns cannot satisfy this
+		// branch node's demand and bounds, so the node is infeasible.
 		return false;
 	}
 
@@ -393,6 +433,8 @@ bool Controller::solveColumnGenerationAtNode(const BranchNode& node, vector<doub
 
 int Controller::findFractionalPatternIndex(const vector<double>& values)
 {
+	// Branch on the first fractional master variable. This is a simple pattern
+	// variable branching rule; stronger rules such as Ryan-Foster are possible.
 	for (int i = 0; i < static_cast<int>(values.size()); i++)
 	{
 		double rounded = floor(values[i] + 0.5);
@@ -406,6 +448,8 @@ int Controller::findFractionalPatternIndex(const vector<double>& values)
 
 void Controller::solveBranchAndPriceNode(const BranchNode& node)
 {
+	// Depth-first branch-and-price. Each node solves its LP by column
+	// generation, prunes by bound, and branches if the solution is fractional.
 	if (_processedBranchAndPriceNodes >= _maxBranchAndPriceNodes)
 	{
 		return;
@@ -440,6 +484,9 @@ void Controller::solveBranchAndPriceNode(const BranchNode& node)
 	int ceilValue = floorValue + 1;
 	string signature = getPatternSignature(_patterns[branchIndex]);
 
+	// Split the fractional variable x_p = value into:
+	//   down: x_p <= floor(value)
+	//   up:   x_p >= ceil(value)
 	BranchNode downBranch = node;
 	downBranch.depth = node.depth + 1;
 	addBranchBound(downBranch, signature, 0, floorValue);
@@ -454,6 +501,8 @@ void Controller::solveBranchAndPriceNode(const BranchNode& node)
 
 void Controller::reportBranchAndPriceSolution()
 {
+	// Report only positive pattern variables from the incumbent. Pattern IDs
+	// are stable enough for output but signatures should be used for logic.
 	cout << endl;
 	if (_bestSolution.empty())
 	{
@@ -481,6 +530,8 @@ void Controller::reportBranchAndPriceSolution()
 
 void Controller::loadMaterials(string dataDir)
 {
+	// Input path is a directory prefix. For example, passing "data\\" reads
+	// "data\\materials.json"; passing an empty string reads from the cwd.
 	Json::Reader reader;
 	Json::Value root;
 	string paramDataFile = dataDir + "materials.json";
@@ -521,6 +572,9 @@ void Controller::loadMaterials(string dataDir)
 
 void Controller::loadProducts(string dataDir)
 {
+	// Product JSON fields:
+	//   width  - demanded product width
+	//   demand - required number of pieces
 	Json::Reader reader;
 	Json::Value root;
 	string paramDataFile = dataDir + "products.json";
@@ -561,6 +615,9 @@ void Controller::loadProducts(string dataDir)
 
 void Controller::solveCG()
 {
+	// Standalone column generation: solve the LP relaxation only, using the
+	// CPLEX Subproblem pricing model. This path is kept for comparison with
+	// the branch-and-price implementation.
 	validateProblemReady();
 	clearPatterns();
 	resetSolvers();
@@ -606,6 +663,8 @@ void Controller::solveCG()
 
 vector<Pattern* > Controller::findInitialPatterns()
 {
+	// A basic feasible column set: one pattern per product, each pattern cutting
+	// as many pieces of that product as fit into one raw roll.
 	validateProblemReady();
 
 	vector<PaperRoll* > materials = _problem->getMaterials();
@@ -642,6 +701,8 @@ void Controller::solveIP()
 
 void Controller::solveBP()
 {
+	// Branch-and-price entry point. The root column pool starts with simple
+	// single-product patterns; each node can add more patterns through pricing.
 	validateProblemReady();
 	clearPatterns();
 	resetSolvers();

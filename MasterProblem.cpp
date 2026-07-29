@@ -3,6 +3,8 @@
 
 MasterProblem::MasterProblem() : Problem()
 {
+	// Build an empty restricted master. Demand rows and pattern columns are
+	// added later so the same class can be used by different algorithms.
 	_cutOpt = IloModel(_env, "cutStock");
 	_RollsUsed = IloAdd(_cutOpt, IloMinimize(_env));
 	_Fill = IloRangeArray(_env);
@@ -37,7 +39,9 @@ void MasterProblem::initialize()
 		exit(1);
 	}
 	
-	// create constraints
+	// Demand constraints:
+	//   sum_p a_ip * x_p >= demand_i
+	// where a_ip is the number of product i pieces in pattern p.
 	for (int i = 0; i < nWdth; i++)
 	{
 		PaperRoll* product = _products[i];
@@ -50,6 +54,10 @@ void MasterProblem::initialize()
 
 void MasterProblem::addArtificialColumns(double cost)
 {
+	// Artificial columns are identity columns with a large objective cost.
+	// They keep the LP feasible while branch-and-price is still generating
+	// real columns. Positive artificial usage after pricing means the node is
+	// infeasible in the real model.
 	for (int i = 0; i < _Fill.getSize(); i++)
 	{
 		IloNumColumn col(_env);
@@ -69,7 +77,8 @@ void MasterProblem::addColumn(Pattern* pattern)
 
 void MasterProblem::addColumn(Pattern* pattern, double lowerBound, double upperBound)
 {
-	// prepare column expression
+	// Build one CPLEX column. It contributes pattern cost to the objective and
+	// product counts to the demand rows.
 	IloNumColumn col(_env);
 	col += _RollsUsed(pattern->getCost());
 	for (auto content : pattern->getContent())
@@ -103,6 +112,8 @@ bool MasterProblem::solve()
 
 vector<double> MasterProblem::getDuals()
 {
+	// Dual prices of demand constraints are passed to the pricing problem.
+	// A new pattern is profitable when cost - dual contribution is negative.
 	vector<double> duals;
 	for (int i = 0; i < _Fill.getSize(); i++)
 	{
@@ -113,6 +124,8 @@ vector<double> MasterProblem::getDuals()
 
 vector<double> MasterProblem::getValues()
 {
+	// Return only the real pattern variable values. Artificial variables are
+	// excluded because they do not correspond to cutting patterns.
 	vector<double> values;
 	for (int j = 0; j < _Cut.getSize(); j++)
 	{
@@ -155,6 +168,8 @@ void MasterProblem::report()
 
 bool MasterProblem::solveIP()
 {
+	// Convert the current restricted master columns to integer variables. This
+	// is not full branch-and-price; it only solves over columns already present.
 	if (!_integerConverted)
 	{
 		_cutOpt.add(IloConversion(_env, _Cut, ILOINT));

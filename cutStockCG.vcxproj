@@ -89,7 +89,7 @@
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>D:\Program Files\IBM\ILOG\CPLEX_Studio127\cplex\lib\x64_windows_vs2015\stat_mdd\cplex1270.lib;D:\Program Files\IBM\ILOG\CPLEX_Studio127\cplex\lib\x64_windows_vs2015\stat_mdd\ilocplex.lib;D:\Program Files\IBM\ILOG\CPLEX_Studio127\concert\lib\x64_windows_vs2015\stat_mdd\concert.lib;E:\code\cutStockCG2\x64\Debug\lib_json.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>D:\Program Files\IBM\ILOG\CPLEX_Studio127\cplex\lib\x64_windows_vs2015\stat_mdd\cplex1270.lib;D:\Program Files\IBM\ILOG\CPLEX_Studio127\cplex\lib\x64_windows_vs2015\stat_mdd\ilocplex.lib;D:\Program Files\IBM\ILOG\CPLEX_Studio127\concert\lib\x64_windows_vs2015\stat_mdd\concert.lib;E:\code\cutStockCG\x64\Debug\lib_json.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">

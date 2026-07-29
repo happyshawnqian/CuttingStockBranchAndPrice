@@ -3,6 +3,8 @@
 
 Subproblem::Subproblem() : Problem()
 {
+	// The pricing model is initialized without variables/constraints until
+	// materials and products are available.
 	_patGen = IloModel(_env, "patGenerator");
 	_ReducedCost = IloAdd(_patGen, IloMinimize(_env));
 	_Use = IloNumVarArray(_env);
@@ -16,6 +18,8 @@ Subproblem::~Subproblem()
 
 void Subproblem::initialize()
 {
+	// Create one integer variable per product. A feasible solution represents
+	// one cutting pattern that fits within the raw roll width.
 	if (_materials.empty() || _products.empty())
 	{
 		cout << "Error, subproblem requires materials and products" << endl;
@@ -23,7 +27,7 @@ void Subproblem::initialize()
 	}
 	int rollWidth = _materials[0]->getWidth();
 
-	// create variables
+	// a_i = number of pieces of product i in this candidate pattern.
 	for (int i = 0; i < static_cast<int>(_products.size()); i++)
 	{
 		PaperRoll* product = _products[i];
@@ -31,7 +35,7 @@ void Subproblem::initialize()
 		_Use.add(IloNumVar(_env, 0, IloInfinity, ILOINT, varName.c_str()));
 	}
 
-	// create constraint
+	// Width capacity: sum_i width_i * a_i <= raw_roll_width.
 	IloExpr exp(_env);
 	for (int i = 0; i < static_cast<int>(_products.size()); i++)
 	{
@@ -46,6 +50,9 @@ void Subproblem::initialize()
 
 void Subproblem::addExcludedPattern(Pattern* pattern)
 {
+	// Add a no-good cut that forces the next solution to differ from the given
+	// pattern in at least one product count. This method is not on the main
+	// branch-and-price path anymore, but is useful for CPLEX-based pricing.
 	if (pattern == nullptr || _materials.empty() || _products.empty()) return;
 
 	int nWdth = static_cast<int>(_products.size());
@@ -83,6 +90,9 @@ void Subproblem::addExcludedPatterns(const vector<Pattern* >& patterns)
 
 void Subproblem::setObjective(const vector<double>& duals)
 {
+	// Reduced cost for a generated column:
+	//   roll_cost - sum_i dual_i * a_i.
+	// A negative value means adding the pattern can improve the master LP.
 	int nWdth = static_cast<int>(_products.size());
 	if (static_cast<int>(duals.size()) != nWdth)
 	{
@@ -120,6 +130,8 @@ bool Subproblem::solve(bool reportFailure)
 
 Pattern* Subproblem::getPattern()
 {
+	// Convert the integer pricing solution back into the Pattern abstraction.
+	// CPLEX returns IloNum values, so near-integers are rounded with tolerance.
 	int nWdth = static_cast<int>(_products.size());
 	IloNumArray newPatt(_env, nWdth);
 	_patSolver.getValues(newPatt, _Use);
@@ -152,6 +164,8 @@ double Subproblem::getReducedCost()
 
 void Subproblem::report()
 {
+	// This reports the pricing objective, i.e. reduced cost, not the master
+	// problem objective. Negative values indicate improving columns.
 	cout << endl;
 	cout << "Reduced cost is " << _patSolver.getValue(_ReducedCost) << endl;
 	cout << endl;

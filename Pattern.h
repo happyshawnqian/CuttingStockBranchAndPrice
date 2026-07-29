@@ -7,8 +7,16 @@ class Pattern
 {
 private:
 	int _id;
-	vector<pair<int, int>> _content;	// a pair is <product_id, number>, how many contained in the pattern for product id 
+
+	// Each entry is <product_index, count>. For example, <1, 3> means this
+	// pattern cuts three pieces of product 1 from one raw material roll.
+	vector<pair<int, int>> _content;
+
+	// Cost of using this pattern once. In the standard one-stock cutting-stock
+	// case this is 1, because one pattern consumes one raw roll.
 	double _cost;
+
+	// Simple monotonic identifier used for reporting and CPLEX variable names.
 	static int _counter;
 public:
 	Pattern();

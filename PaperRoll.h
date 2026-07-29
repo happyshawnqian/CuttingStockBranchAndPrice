@@ -4,9 +4,15 @@ class PaperRoll
 {
 private:
 	int _id;
+
+	// Width is the physical roll width. For products, _number is demand; for
+	// materials, _number is the available capacity read from JSON.
 	int _width;
 	int _number;
-	bool _isMaterial;	// is material or product, to cut or to be cut?
+	bool _isMaterial;	// true for raw material, false for demanded product
+
+	// Cost is used by the master/pricing objective. The current data loader
+	// keeps it at the default value 1 unless it is set manually.
 	double _cost;
 	static int _counter;
 

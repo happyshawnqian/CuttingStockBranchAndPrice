@@ -7,6 +7,9 @@ using namespace std;
 class Problem
 {
 protected:
+	// Materials are raw rolls; products are demanded roll widths. The vectors
+	// store pointers for compatibility with the original project structure.
+	// Ownership is intentionally handled by Controller, not by this base class.
 	vector<PaperRoll* > _materials;
 	vector<PaperRoll* > _products;
 public:
