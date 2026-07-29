@@ -80,13 +80,6 @@ private:
 	bool getPatternBounds(const BranchNode& node, Pattern* pattern, double& lowerBound, double& upperBound);
 	void addBranchBound(BranchNode& node, const string& signature, int lowerBound, int upperBound);
 
-	// Pricing for the branch-and-price implementation is enumerative. For the
-	// small cutting-stock instances targeted by this project, enumerating all
-	// feasible patterns is deterministic and avoids duplicate pricing columns.
-	void enumeratePricingPatterns(int productIndex, int remainingWidth, const vector<double>& duals,
-		vector<int>& counts, double& bestReducedCost, vector<int>& bestCounts);
-	Pattern* findBestPricingPattern(const vector<double>& duals);
-
 	// Branch-and-price search helpers.
 	bool solveColumnGenerationAtNode(const BranchNode& node, vector<double>& values, double& objective);
 	void solveBranchAndPriceNode(const BranchNode& node);

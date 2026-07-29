@@ -51,8 +51,7 @@ void Subproblem::initialize()
 void Subproblem::addExcludedPattern(Pattern* pattern)
 {
 	// Add a no-good cut that forces the next solution to differ from the given
-	// pattern in at least one product count. This method is not on the main
-	// branch-and-price path anymore, but is useful for CPLEX-based pricing.
+	// pattern in at least one product count.
 	if (pattern == nullptr || _materials.empty() || _products.empty()) return;
 
 	int nWdth = static_cast<int>(_products.size());
@@ -67,16 +66,31 @@ void Subproblem::addExcludedPattern(Pattern* pattern)
 	}
 
 	IloExpr differs(_env);
+	bool hasAlternative = false;
 	for (int i = 0; i < nWdth; i++)
 	{
 		int maxUse = rollWidth / _products[i]->getWidth();
-		string varName = "diff_" + to_string(pattern->getId()) + "_" + to_string(i);
-		IloBoolVar diff(_env, varName.c_str());
-		differs += diff;
-		_patGen.add(_Use[i] - target[i] <= maxUse * diff);
-		_patGen.add(target[i] - _Use[i] <= maxUse * diff);
+		if (target[i] > 0)
+		{
+			string lessName = "less_" + to_string(pattern->getId()) + "_" + to_string(i);
+			IloBoolVar less(_env, lessName.c_str());
+			differs += less;
+			_patGen.add(_Use[i] + maxUse * less <= target[i] - 1 + maxUse);
+			hasAlternative = true;
+		}
+		if (target[i] < maxUse)
+		{
+			string greaterName = "greater_" + to_string(pattern->getId()) + "_" + to_string(i);
+			IloBoolVar greater(_env, greaterName.c_str());
+			differs += greater;
+			_patGen.add(_Use[i] - maxUse * greater >= target[i] + 1 - maxUse);
+			hasAlternative = true;
+		}
 	}
-	_patGen.add(differs >= 1);
+	if (hasAlternative)
+	{
+		_patGen.add(differs >= 1);
+	}
 	differs.end();
 }
 

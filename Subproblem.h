@@ -5,12 +5,12 @@
 #include <iostream>
 using namespace std;
 
-// Pricing subproblem for the column-generation-only path.
+// Pricing subproblem for column generation and branch-and-price.
 //
 // Given dual values from the master demand constraints, this model solves a
 // bounded knapsack problem and returns a cutting pattern with negative reduced
-// cost. The branch-and-price path currently uses deterministic enumeration in
-// Controller, but this class is still used by solveCG().
+// cost. Branch-and-price uses no-good constraints to avoid regenerating any
+// pattern already present in the global column pool.
 class Subproblem : public Problem
 {
 private:
