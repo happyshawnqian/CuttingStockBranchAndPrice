@@ -131,6 +131,8 @@ bool Subproblem::solve()
 bool Subproblem::solve(bool reportFailure)
 {
 	//_patSolver.exportModel("subproblem.lp");
+	//cout << "============ Subproblem to solve ============" << endl;
+	_patSolver.setOut(_env.getNullStream());
 	if (!_patSolver.solve())
 	{
 		if (reportFailure)

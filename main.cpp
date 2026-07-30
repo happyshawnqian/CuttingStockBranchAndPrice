@@ -19,5 +19,5 @@ int main(int argc, char** argv)
 	// solveCG() and solveIP() remain available for comparison experiments.
 	controller.solveBP();
 
-	system("pause");
+	//system("pause");
 }

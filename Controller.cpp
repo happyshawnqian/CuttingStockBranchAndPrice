@@ -470,10 +470,12 @@ void Controller::reportBranchAndPriceSolution()
 			if (value > 0)
 			{
 				cout << "  Pattern " << _patterns[i]->getId() << " = " << value << endl;
+				_patterns[i]->print();
 			}
 		}
 	}
 	cout << "Processed " << _processedBranchAndPriceNodes << " branch-and-price nodes" << endl;
+	cout << "Generated " << _patterns.size() << " patterns" << endl;
 	if (_processedBranchAndPriceNodes >= _maxBranchAndPriceNodes)
 	{
 		cout << "Warning, branch-and-price stopped at the node limit" << endl;

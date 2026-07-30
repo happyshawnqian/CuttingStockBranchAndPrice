@@ -102,6 +102,7 @@ void MasterProblem::addColumns(const vector<Pattern* >& patterns)
 bool MasterProblem::solve()
 {
 	//_cutSolver.exportModel("masterProblem.lp");
+	_cutSolver.setOut(_env.getNullStream());
 	if (!_cutSolver.solve())
 	{
 		cout << "Error, master problem could not be solved" << endl;
