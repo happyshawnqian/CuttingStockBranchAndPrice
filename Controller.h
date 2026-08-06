@@ -7,6 +7,59 @@
 #include "Subproblem.h"
 using namespace std;
 
+class BPNode
+{
+public:
+	struct PatternBound
+	{
+		// Signature is a stable textual representation of the pattern content,
+		// for example "2,0,1". It is used instead of Pattern::_id so that the
+		// same cutting pattern is recognized even if generated as a new object.
+		string signature;
+
+		// Bounds apply to the master variable x_pattern, i.e. the number of
+		// times this cutting pattern may be used in the current branch node.
+		// upperBound == -1 means no finite upper bound.
+		int lowerBound;
+		int upperBound;
+	};
+
+	BPNode();
+	BPNode(int depth);
+
+	void addBound(const string& signature, int lowerBound, int upperBound);
+	void setEvaluation(const vector<double>& values, double objective, int patternCount, int sequence);
+	bool isEvaluated() const;
+	bool isSolvedWithPatternCount(int patternCount) const;
+
+	const vector<PatternBound>& getBounds() const;
+	const vector<double>& getValues() const;
+	double getObjective() const;
+	int getDepth() const;
+	int getSequence() const;
+	void setDepth(int depth);
+
+private:
+	// Branching is implemented by adding bounds on pattern variables.
+	// Each child node inherits all parent bounds and adds one more bound.
+	vector<PatternBound> _bounds;
+
+	// LP information for best-first search. These fields are filled after the
+	// node's restricted master is solved by column generation.
+	vector<double> _values;
+	double _objective;
+	int _patternCount;
+	int _sequence;
+	int _depth;
+	bool _evaluated;
+};
+
+class BPNodeCompare
+{
+public:
+	bool operator()(const BPNode& left, const BPNode& right) const;
+};
+
 class Controller
 {
 private:
@@ -31,32 +84,11 @@ private:
 	vector<double> _bestSolution;
 	int _processedBranchAndPriceNodes;
 	int _maxBranchAndPriceNodes;
+	int _nextBranchAndPriceSequence;
 
 	// Global column pool. Every Pattern represents one cutting pattern, and
 	// branch-and-price nodes build restricted master problems from this pool.
 	vector<Pattern* > _patterns;
-
-	struct PatternBound
-	{
-		// Signature is a stable textual representation of the pattern content,
-		// for example "2,0,1". It is used instead of Pattern::_id so that the
-		// same cutting pattern is recognized even if generated as a new object.
-		string signature;
-
-		// Bounds apply to the master variable x_pattern, i.e. the number of
-		// times this cutting pattern may be used in the current branch node.
-		// upperBound == -1 means no finite upper bound.
-		int lowerBound;
-		int upperBound;
-	};
-
-	struct BranchNode
-	{
-		// Branching is implemented by adding bounds on pattern variables.
-		// Each child node inherits all parent bounds and adds one more bound.
-		vector<PatternBound> bounds;
-		int depth;
-	};
 
 	// Clear helpers release only the objects that this controller owns.
 	void clearMaterials(bool clearProblemVector);
@@ -77,12 +109,13 @@ private:
 
 	// Branch-node bounds are translated into variable lower/upper bounds when
 	// a node's restricted master problem is built.
-	bool getPatternBounds(const BranchNode& node, Pattern* pattern, double& lowerBound, double& upperBound);
-	void addBranchBound(BranchNode& node, const string& signature, int lowerBound, int upperBound);
+	bool getPatternBounds(const BPNode& node, Pattern* pattern, double& lowerBound, double& upperBound);
 
 	// Branch-and-price search helpers.
-	bool solveColumnGenerationAtNode(const BranchNode& node, vector<double>& values, double& objective);
-	void solveBranchAndPriceNode(const BranchNode& node);
+	bool solveColumnGenerationAtNode(const BPNode& node, vector<double>& values, double& objective);
+	bool evaluateBPNode(BPNode& node);
+	void createChildNodes(const BPNode& node, int branchIndex, BPNode& downNode, BPNode& upNode);
+	void solveBranchAndPriceNode(const BPNode& node);
 	int findFractionalPatternIndex(const vector<double>& values);
 	void reportBranchAndPriceSolution();
 

@@ -1,7 +1,102 @@
 #include "Controller.h"
 #include <cstdlib>
 #include <cmath>
+#include <queue>
 #include <sstream>
+
+BPNode::BPNode()
+{
+	_objective = 0;
+	_patternCount = 0;
+	_sequence = 0;
+	_depth = 0;
+	_evaluated = false;
+}
+
+BPNode::BPNode(int depth)
+{
+	_objective = 0;
+	_patternCount = 0;
+	_sequence = 0;
+	_depth = depth;
+	_evaluated = false;
+}
+
+void BPNode::addBound(const string& signature, int lowerBound, int upperBound)
+{
+	PatternBound bound;
+	bound.signature = signature;
+	bound.lowerBound = lowerBound;
+	bound.upperBound = upperBound;
+	_bounds.push_back(bound);
+}
+
+void BPNode::setEvaluation(const vector<double>& values, double objective, int patternCount, int sequence)
+{
+	_values = values;
+	_objective = objective;
+	_patternCount = patternCount;
+	_sequence = sequence;
+	_evaluated = true;
+}
+
+bool BPNode::isEvaluated() const
+{
+	return _evaluated;
+}
+
+bool BPNode::isSolvedWithPatternCount(int patternCount) const
+{
+	return _evaluated && _patternCount == patternCount;
+}
+
+const vector<BPNode::PatternBound>& BPNode::getBounds() const
+{
+	return _bounds;
+}
+
+const vector<double>& BPNode::getValues() const
+{
+	return _values;
+}
+
+double BPNode::getObjective() const
+{
+	return _objective;
+}
+
+int BPNode::getDepth() const
+{
+	return _depth;
+}
+
+int BPNode::getSequence() const
+{
+	return _sequence;
+}
+
+void BPNode::setDepth(int depth)
+{
+	_depth = depth;
+	_values.clear();
+	_objective = 0;
+	_patternCount = 0;
+	_sequence = 0;
+	_evaluated = false;
+}
+
+bool BPNodeCompare::operator()(const BPNode& left, const BPNode& right) const
+{
+	if (fabs(left.getObjective() - right.getObjective()) > Utility::RC_EPS)
+	{
+		return left.getObjective() > right.getObjective();
+	}
+	if (left.getDepth() != right.getDepth())
+	{
+		return left.getDepth() > right.getDepth();
+	}
+	return left.getSequence() > right.getSequence();
+}
 
 Controller::Controller()
 {
@@ -16,6 +111,7 @@ Controller::Controller()
 	_bestObjective = 1.0e100;
 	_processedBranchAndPriceNodes = 0;
 	_maxBranchAndPriceNodes = 1000;
+	_nextBranchAndPriceSequence = 0;
 }
 
 Controller::Controller(Problem* problem)
@@ -31,6 +127,7 @@ Controller::Controller(Problem* problem)
 	_bestObjective = 1.0e100;
 	_processedBranchAndPriceNodes = 0;
 	_maxBranchAndPriceNodes = 1000;
+	_nextBranchAndPriceSequence = 0;
 
 	syncProblemToSolvers();
 }
@@ -259,7 +356,7 @@ bool Controller::isKnownPatternSignature(const string& signature)
 	return false;
 }
 
-bool Controller::getPatternBounds(const BranchNode& node, Pattern* pattern, double& lowerBound, double& upperBound)
+bool Controller::getPatternBounds(const BPNode& node, Pattern* pattern, double& lowerBound, double& upperBound)
 {
 	// A node can inherit multiple bounds for the same pattern. The effective
 	// lower bound is the maximum lower bound; the effective upper bound is the
@@ -268,7 +365,7 @@ bool Controller::getPatternBounds(const BranchNode& node, Pattern* pattern, doub
 	int lower = 0;
 	int upper = -1;
 
-	for (auto bound : node.bounds)
+	for (auto bound : node.getBounds())
 	{
 		if (bound.signature == signature)
 		{
@@ -293,16 +390,7 @@ bool Controller::getPatternBounds(const BranchNode& node, Pattern* pattern, doub
 	return true;
 }
 
-void Controller::addBranchBound(BranchNode& node, const string& signature, int lowerBound, int upperBound)
-{
-	PatternBound bound;
-	bound.signature = signature;
-	bound.lowerBound = lowerBound;
-	bound.upperBound = upperBound;
-	node.bounds.push_back(bound);
-}
-
-bool Controller::solveColumnGenerationAtNode(const BranchNode& node, vector<double>& values, double& objective)
+bool Controller::solveColumnGenerationAtNode(const BPNode& node, vector<double>& values, double& objective)
 {
 	// Build a fresh restricted master for this branch node. Existing global
 	// columns are inserted with the node-specific bounds inherited from the
@@ -399,40 +487,47 @@ int Controller::findFractionalPatternIndex(const vector<double>& values)
 	return -1;
 }
 
-void Controller::solveBranchAndPriceNode(const BranchNode& node)
+bool Controller::evaluateBPNode(BPNode& node)
 {
-	// Depth-first branch-and-price. Each node solves its LP by column
-	// generation, prunes by bound, and branches if the solution is fractional.
 	if (_processedBranchAndPriceNodes >= _maxBranchAndPriceNodes)
 	{
-		return;
+		return false;
 	}
+
 	_processedBranchAndPriceNodes++;
 
 	vector<double> values;
 	double objective = 0;
 	if (!solveColumnGenerationAtNode(node, values, objective))
 	{
-		return;
-	}
-	cout << "Node " << _processedBranchAndPriceNodes << ", depth " << node.depth
-		<< ", LP objective = " << objective << endl;
-	if (objective >= _bestObjective - Utility::RC_EPS)
-	{
-		return;
+		return false;
 	}
 
-	int branchIndex = findFractionalPatternIndex(values);
-	if (branchIndex < 0)
+	cout << "Node " << _processedBranchAndPriceNodes << ", depth " << node.getDepth()
+		<< ", LP objective = " << objective << endl;
+
+	if (objective >= _bestObjective - Utility::RC_EPS)
+	{
+		return false;
+	}
+
+	if (findFractionalPatternIndex(values) < 0)
 	{
 		_bestObjective = objective;
 		_bestSolution = values;
 		cout << "New incumbent uses " << _bestObjective << " rolls at node "
 			<< _processedBranchAndPriceNodes << endl;
-		return;
+		return false;
 	}
 
-	double value = values[branchIndex];
+	node.setEvaluation(values, objective, static_cast<int>(_patterns.size()), _nextBranchAndPriceSequence);
+	_nextBranchAndPriceSequence++;
+	return true;
+}
+
+void Controller::createChildNodes(const BPNode& node, int branchIndex, BPNode& downNode, BPNode& upNode)
+{
+	double value = node.getValues()[branchIndex];
 	int floorValue = static_cast<int>(floor(value));
 	int ceilValue = floorValue + 1;
 	string signature = getPatternSignature(_patterns[branchIndex]);
@@ -440,16 +535,73 @@ void Controller::solveBranchAndPriceNode(const BranchNode& node)
 	// Split the fractional variable x_p = value into:
 	//   down: x_p <= floor(value)
 	//   up:   x_p >= ceil(value)
-	BranchNode downBranch = node;
-	downBranch.depth = node.depth + 1;
-	addBranchBound(downBranch, signature, 0, floorValue);
+	downNode = node;
+	downNode.setDepth(node.getDepth() + 1);
+	downNode.addBound(signature, 0, floorValue);
 
-	BranchNode upBranch = node;
-	upBranch.depth = node.depth + 1;
-	addBranchBound(upBranch, signature, ceilValue, -1);
+	upNode = node;
+	upNode.setDepth(node.getDepth() + 1);
+	upNode.addBound(signature, ceilValue, -1);
+}
 
-	solveBranchAndPriceNode(upBranch);
-	solveBranchAndPriceNode(downBranch);
+void Controller::solveBranchAndPriceNode(const BPNode& node)
+{
+	// Best-first branch-and-price. Each open node is stored with its LP bound,
+	// and the node with the smallest bound is branched first.
+	priority_queue<BPNode, vector<BPNode>, BPNodeCompare> openNodes;
+
+	BPNode rootNode = node;
+	if (evaluateBPNode(rootNode))
+	{
+		openNodes.push(rootNode);
+	}
+
+	while (!openNodes.empty() && _processedBranchAndPriceNodes < _maxBranchAndPriceNodes)
+	{
+		BPNode current = openNodes.top();
+		openNodes.pop();
+
+		// The global column pool can grow while other nodes are evaluated. If
+		// this node was solved with an older pool, refresh its LP bound before
+		// using it for branching.
+		if (!current.isSolvedWithPatternCount(static_cast<int>(_patterns.size())))
+		{
+			if (evaluateBPNode(current))
+			{
+				openNodes.push(current);
+			}
+			continue;
+		}
+
+		if (current.getObjective() >= _bestObjective - Utility::RC_EPS)
+		{
+			continue;
+		}
+
+		int branchIndex = findFractionalPatternIndex(current.getValues());
+		if (branchIndex < 0)
+		{
+			_bestObjective = current.getObjective();
+			_bestSolution = current.getValues();
+			cout << "New incumbent uses " << _bestObjective << " rolls at node "
+				<< _processedBranchAndPriceNodes << endl;
+			continue;
+		}
+
+		BPNode downNode;
+		BPNode upNode;
+		createChildNodes(current, branchIndex, downNode, upNode);
+
+		if (evaluateBPNode(upNode))
+		{
+			openNodes.push(upNode);
+		}
+
+		if (evaluateBPNode(downNode))
+		{
+			openNodes.push(downNode);
+		}
+	}
 }
 
 void Controller::reportBranchAndPriceSolution()
@@ -666,6 +818,7 @@ void Controller::solveBP()
 	_bestObjective = 1.0e100;
 	_bestSolution.clear();
 	_processedBranchAndPriceNodes = 0;
+	_nextBranchAndPriceSequence = 0;
 
 	vector<Pattern* > initialPatterns = findInitialPatterns();
 	for (auto pattern : initialPatterns)
@@ -680,8 +833,7 @@ void Controller::solveBP()
 		}
 	}
 
-	BranchNode root;
-	root.depth = 0;
+	BPNode root(0);
 	solveBranchAndPriceNode(root);
 	reportBranchAndPriceSolution();
 }
