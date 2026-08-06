@@ -35,12 +35,18 @@ public:
 
 	const vector<PatternBound>& getBounds() const;
 	const vector<double>& getValues() const;
+	int getId() const;
 	double getObjective() const;
 	int getDepth() const;
 	int getSequence() const;
 	void setDepth(int depth);
 
 private:
+	// Monotonic identifier for readable branch-and-price logs. Queue copies
+	// keep the same id; only newly constructed logical nodes get new ids.
+	int _id;
+	static int _counter;
+
 	// Branching is implemented by adding bounds on pattern variables.
 	// Each child node inherits all parent bounds and adds one more bound.
 	vector<PatternBound> _bounds;

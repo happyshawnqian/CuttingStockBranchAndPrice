@@ -4,8 +4,12 @@
 #include <queue>
 #include <sstream>
 
+int BPNode::_counter = 0;
+
 BPNode::BPNode()
 {
+	_id = _counter;
+	_counter++;
 	_objective = 0;
 	_patternCount = 0;
 	_sequence = 0;
@@ -15,6 +19,8 @@ BPNode::BPNode()
 
 BPNode::BPNode(int depth)
 {
+	_id = _counter;
+	_counter++;
 	_objective = 0;
 	_patternCount = 0;
 	_sequence = 0;
@@ -58,6 +64,11 @@ const vector<BPNode::PatternBound>& BPNode::getBounds() const
 const vector<double>& BPNode::getValues() const
 {
 	return _values;
+}
+
+int BPNode::getId() const
+{
+	return _id;
 }
 
 double BPNode::getObjective() const
@@ -510,8 +521,8 @@ bool Controller::evaluateBPNode(BPNode& node)
 		return false;
 	}
 
-	cout << "Node " << _processedBranchAndPriceNodes << ", depth " << node.getDepth()
-		<< ", LP objective = " << objective << endl;
+	cout << "Node id " << node.getId() << ", depth " << node.getDepth() << ", processed " << _processedBranchAndPriceNodes
+		 << ", LP objective = " << objective << endl;
 
 	if (objective >= _bestObjective - Utility::RC_EPS)
 	{
@@ -522,8 +533,8 @@ bool Controller::evaluateBPNode(BPNode& node)
 	{
 		_bestObjective = objective;
 		_bestSolution = values;
-		cout << "New incumbent uses " << _bestObjective << " rolls at node "
-			<< _processedBranchAndPriceNodes << endl;
+		cout << "New incumbent uses " << _bestObjective << " rolls at node id "
+			<< node.getId() << endl;
 		return false;
 	}
 
@@ -542,12 +553,18 @@ void Controller::createChildNodes(const BPNode& node, int branchIndex, BPNode& d
 	// Split the fractional variable x_p = value into:
 	//   down: x_p <= floor(value)
 	//   up:   x_p >= ceil(value)
-	downNode = node;
 	downNode.setDepth(node.getDepth() + 1);
+	for (auto bound : node.getBounds())
+	{
+		downNode.addBound(bound.signature, bound.lowerBound, bound.upperBound);
+	}
 	downNode.addBound(signature, 0, floorValue);
 
-	upNode = node;
 	upNode.setDepth(node.getDepth() + 1);
+	for (auto bound : node.getBounds())
+	{
+		upNode.addBound(bound.signature, bound.lowerBound, bound.upperBound);
+	}
 	upNode.addBound(signature, ceilValue, -1);
 }
 
@@ -590,8 +607,8 @@ void Controller::solveBranchAndPriceNode(const BPNode& node)
 		{
 			_bestObjective = current.getObjective();
 			_bestSolution = current.getValues();
-			cout << "New incumbent uses " << _bestObjective << " rolls at node "
-				<< _processedBranchAndPriceNodes << endl;
+			cout << "New incumbent uses " << _bestObjective << " rolls at node id "
+				<< current.getId() << endl;
 			continue;
 		}
 
