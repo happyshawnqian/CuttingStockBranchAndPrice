@@ -50,6 +50,8 @@ void Subproblem::initialize()
 
 void Subproblem::addExcludedPattern(Pattern* pattern)
 {
+	//return; // for debug
+
 	// Add a no-good cut that forces the next solution to differ from the given
 	// pattern in at least one product count.
 	if (pattern == nullptr || _materials.empty() || _products.empty()) return;

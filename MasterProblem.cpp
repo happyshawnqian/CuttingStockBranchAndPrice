@@ -108,6 +108,9 @@ bool MasterProblem::solve()
 		cout << "Error, master problem could not be solved" << endl;
 		return false;
 	}
+
+	//report();
+
 	return true;
 }
 

@@ -440,6 +440,9 @@ bool Controller::solveColumnGenerationAtNode(const BPNode& node, vector<double>&
 		}
 
 		Pattern* newPattern = subproblem.getPattern();
+		//cout << "************* new pattern *************" << endl;
+		//newPattern->print();
+		//cout << "reduced cost = " << subproblem.getReducedCost() << endl;
 		if (isKnownPattern(newPattern))
 		{
 			// A duplicate column must not be added under a new Pattern id,
@@ -787,6 +790,9 @@ vector<Pattern* > Controller::findInitialPatterns()
 		Pattern* newPattern = new Pattern();
 		newPattern->addContent(make_pair(i, materialWidth / paperRoll->getWidth()));
 		result.push_back(newPattern);
+
+		//cout << "********** initial pattern **********" << endl;
+		//newPattern->print();
 	}
 
 	return result;
