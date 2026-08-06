@@ -140,6 +140,7 @@ bool Subproblem::solve(bool reportFailure)
 		if (reportFailure)
 		{
 			cout << "Error, subproblem could not be solved" << endl;
+			exit(1);
 		}
 		return false;
 	}
