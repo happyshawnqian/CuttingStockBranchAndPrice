@@ -109,7 +109,9 @@ bool MasterProblem::solve()
 		return false;
 	}
 
-	//report();
+#ifdef DEBUG
+	report();
+#endif
 
 	return true;
 }

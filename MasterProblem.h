@@ -3,6 +3,7 @@
 #include "Pattern.h"
 #include "PaperRoll.h"
 #include "Problem.h"
+#include "Utility.h"
 
 // Restricted master problem for cutting stock.
 //

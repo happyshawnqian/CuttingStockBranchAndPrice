@@ -5,6 +5,7 @@
 #include <string>
 #include "MasterProblem.h"
 #include "Subproblem.h"
+#include "Utility.h"
 using namespace std;
 
 class BPNode
