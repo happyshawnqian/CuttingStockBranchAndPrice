@@ -612,8 +612,8 @@ void Controller::solveBranchAndPriceNode(const BPNode& node)
 			continue;
 		}
 
-		BPNode downNode;
 		BPNode upNode;
+		BPNode downNode;
 		createChildNodes(current, branchIndex, downNode, upNode);
 
 		if (evaluateBPNode(upNode))
