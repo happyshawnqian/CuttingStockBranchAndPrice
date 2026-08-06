@@ -152,18 +152,51 @@ double MasterProblem::getArtificialUsage()
 
 void MasterProblem::report()
 {
+	cout << "Master Problem report after solved" << endl;
+	cout << "Using " << _cutSolver.getObjValue()
+		<< " rolls" << endl;
 	cout << endl;
-	cout << "Using " << _cutSolver.getObjValue() << " rolls" << endl;
-	cout << endl;
+
+	cout << "Pattern variables:" << endl;
 
 	for (int j = 0; j < _Cut.getSize(); j++)
 	{
-		cout << "  Cut" << j << " = " << _cutSolver.getValue(_Cut[j]) << endl;
+		double value = _cutSolver.getValue(_Cut[j]);
+		double lowerBound = _Cut[j].getLB();
+		double upperBound = _Cut[j].getUB();
+		double reducedCost = _cutSolver.getReducedCost(_Cut[j]);
+
+		cout << "  "
+			<< _Cut[j].getName()
+			<< " = " << value
+			<< ", reduced cost = " << reducedCost
+			<< ", bounds = ["
+			<< lowerBound << ", ";
+
+		if (upperBound >= IloInfinity / 2)
+		{
+			cout << "+infinity";
+		}
+		else
+		{
+			cout << upperBound;
+		}
+
+		cout << "]" << endl;
 	}
+
 	cout << endl;
-	for (int i = 0; i < _Fill.getSize(); i++) {
-		cout << "  Fill" << i << " = " << _cutSolver.getDual(_Fill[i]) << endl;
+
+	cout << "Demand constraint duals:" << endl;
+
+	for (int i = 0; i < _Fill.getSize(); i++)
+	{
+		cout << "  Fill" << i
+			<< " dual = "
+			<< _cutSolver.getDual(_Fill[i])
+			<< endl;
 	}
+
 	cout << endl;
 }
 
