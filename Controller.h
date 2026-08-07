@@ -89,6 +89,9 @@ private:
 	// values of the master pattern variables at the best integer leaf found.
 	double _bestObjective;
 	vector<double> _bestSolution;
+	int _bestNodeId;
+	int _bestNodeDepth;
+
 	int _processedBranchAndPriceNodes;
 	int _maxBranchAndPriceNodes;
 	int _nextBranchAndPriceSequence;

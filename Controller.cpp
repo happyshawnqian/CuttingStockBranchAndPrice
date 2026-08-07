@@ -136,6 +136,8 @@ Controller::Controller(Problem* problem)
 	_ownsMaterials = false;
 	_ownsProducts = false;
 	_bestObjective = 1.0e100;
+	_bestNodeId = -1;
+	_bestNodeDepth = -1;
 	_processedBranchAndPriceNodes = 0;
 	_maxBranchAndPriceNodes = 1000;
 	_nextBranchAndPriceSequence = 0;
@@ -522,7 +524,7 @@ bool Controller::evaluateBPNode(BPNode& node)
 	}
 
 	cout << "Node id " << node.getId() << ", depth " << node.getDepth() << ", processed " << _processedBranchAndPriceNodes
-		 << ", LP objective = " << objective << endl;
+		<< ", LP objective = " << objective << endl;
 
 	if (objective >= _bestObjective - Utility::RC_EPS)
 	{
@@ -533,8 +535,10 @@ bool Controller::evaluateBPNode(BPNode& node)
 	{
 		_bestObjective = objective;
 		_bestSolution = values;
+		_bestNodeId = node.getId();
+		_bestNodeDepth = node.getDepth();
 		cout << "New incumbent uses " << _bestObjective << " rolls at node id "
-			<< node.getId() << endl;
+			<< node.getId() << " on level " << node.getDepth() << endl;
 		return false;
 	}
 
@@ -607,8 +611,10 @@ void Controller::solveBranchAndPriceNode(const BPNode& node)
 		{
 			_bestObjective = current.getObjective();
 			_bestSolution = current.getValues();
+			_bestNodeId = current.getId();
+			_bestNodeDepth = current.getId();
 			cout << "New incumbent uses " << _bestObjective << " rolls at node id "
-				<< current.getId() << endl;
+				<< current.getId() << " on level " << current.getDepth() << endl;
 			continue;
 		}
 
@@ -639,7 +645,9 @@ void Controller::reportBranchAndPriceSolution()
 	}
 	else
 	{
-		cout << "Best branch-and-price solution uses " << _bestObjective << " rolls" << endl;
+		cout << "Best branch-and-price solution uses " << _bestObjective
+			<< " rolls, found at node id " << _bestNodeId
+			<< " on level " << _bestNodeDepth << endl;
 		for (int i = 0; i < static_cast<int>(_bestSolution.size()) && i < static_cast<int>(_patterns.size()); i++)
 		{
 			int value = static_cast<int>(floor(_bestSolution[i] + 0.5));
@@ -756,7 +764,7 @@ void Controller::solveCG()
 
 	_masterProblem->initialize();
 	_subproblem->initialize();
-	
+
 	vector<Pattern* > initialPatterns = findInitialPatterns();
 	_patterns.insert(_patterns.end(), initialPatterns.begin(), initialPatterns.end());
 	_masterProblem->addColumns(initialPatterns);
@@ -846,6 +854,8 @@ void Controller::solveBP()
 
 	_bestObjective = 1.0e100;
 	_bestSolution.clear();
+	_bestNodeId = -1;
+	_bestNodeDepth = -1;
 	_processedBranchAndPriceNodes = 0;
 	_nextBranchAndPriceSequence = 0;
 
