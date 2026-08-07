@@ -588,14 +588,14 @@ void Controller::solveBranchAndPriceNode(const BPNode& node)
 		// The global column pool can grow while other nodes are evaluated. If
 		// this node was solved with an older pool, refresh its LP bound before
 		// using it for branching.
-		if (!current.isSolvedWithPatternCount(static_cast<int>(_patterns.size())))
-		{
-			if (evaluateBPNode(current))
-			{
-				openNodes.push(current);
-			}
-			continue;
-		}
+		//if (!current.isSolvedWithPatternCount(static_cast<int>(_patterns.size())))
+		//{
+		//	if (evaluateBPNode(current))
+		//	{
+		//		openNodes.push(current);
+		//	}
+		//	continue;
+		//}
 
 		if (current.getObjective() >= _bestObjective - Utility::RC_EPS)
 		{
