@@ -612,7 +612,7 @@ void Controller::solveBranchAndPriceNode(const BPNode& node)
 			_bestObjective = current.getObjective();
 			_bestSolution = current.getValues();
 			_bestNodeId = current.getId();
-			_bestNodeDepth = current.getId();
+			_bestNodeDepth = current.getDepth();
 			cout << "New incumbent uses " << _bestObjective << " rolls at node id "
 				<< current.getId() << " on level " << current.getDepth() << endl;
 			continue;
