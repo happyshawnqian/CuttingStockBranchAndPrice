@@ -98,9 +98,16 @@ void BPNode::setDepth(int depth)
 
 bool BPNodeCompare::operator()(const BPNode& left, const BPNode& right) const
 {
-	if (fabs(left.getObjective() - right.getObjective()) > Utility::RC_EPS)
+	// Use an exact ordering here so priority_queue::top() is the node with the
+	// true smallest LP objective. Numerical tolerances belong in bound tests,
+	// not in a comparator that must provide a strict weak ordering.
+	if (left.getObjective() > right.getObjective())
 	{
-		return left.getObjective() > right.getObjective();
+		return true;
+	}
+	if (left.getObjective() < right.getObjective())
+	{
+		return false;
 	}
 	if (left.getDepth() != right.getDepth())
 	{
@@ -120,6 +127,12 @@ Controller::Controller()
 	_ownsMaterials = false;
 	_ownsProducts = false;
 	_bestObjective = 1.0e100;
+	_bestNodeId = -1;
+	_bestNodeDepth = -1;
+	_lowerBound = 0;
+	_terminatedByIntegerBound = false;
+	_stoppedAtNodeLimit = false;
+	_searchTreeExhausted = false;
 	_processedBranchAndPriceNodes = 0;
 	_maxBranchAndPriceNodes = 1000;
 	_nextBranchAndPriceSequence = 0;
@@ -138,6 +151,10 @@ Controller::Controller(Problem* problem)
 	_bestObjective = 1.0e100;
 	_bestNodeId = -1;
 	_bestNodeDepth = -1;
+	_lowerBound = 0;
+	_terminatedByIntegerBound = false;
+	_stoppedAtNodeLimit = false;
+	_searchTreeExhausted = false;
 	_processedBranchAndPriceNodes = 0;
 	_maxBranchAndPriceNodes = 1000;
 	_nextBranchAndPriceSequence = 0;
@@ -572,6 +589,40 @@ void Controller::createChildNodes(const BPNode& node, int branchIndex, BPNode& d
 	upNode.addBound(signature, ceilValue, -1);
 }
 
+bool Controller::hasBranchAndPriceIncumbent() const
+{
+	return _bestNodeId >= 0;
+}
+
+bool Controller::isIntegerBoundClosed() const
+{
+	if (!hasBranchAndPriceIncumbent())
+	{
+		return false;
+	}
+
+	// Every feasible integer objective is a whole number of rolls. Therefore,
+	// ceil(LP lower bound) is a valid lower bound for the integer problem.
+	double integerLowerBound = ceil(_lowerBound - Utility::BP_BOUND_EPS);
+	return integerLowerBound >= _bestObjective - Utility::BP_BOUND_EPS;
+}
+
+void Controller::reportBranchAndPriceBounds() const
+{
+	double integerLowerBound = ceil(_lowerBound - Utility::BP_BOUND_EPS);
+	cout << "Global LP lower bound = " << _lowerBound
+		<< ", integer lower bound = " << integerLowerBound;
+	if (hasBranchAndPriceIncumbent())
+	{
+		cout << ", upper bound = " << _bestObjective;
+	}
+	else
+	{
+		cout << ", upper bound = not available";
+	}
+	cout << endl;
+}
+
 void Controller::solveBranchAndPriceNode(const BPNode& node)
 {
 	// Best-first branch-and-price. Each open node is stored with its LP bound,
@@ -584,22 +635,30 @@ void Controller::solveBranchAndPriceNode(const BPNode& node)
 		openNodes.push(rootNode);
 	}
 
-	while (!openNodes.empty() && _processedBranchAndPriceNodes < _maxBranchAndPriceNodes)
+	while (!openNodes.empty())
 	{
+		// All nodes in the queue have completed pricing, so the smallest queued
+		// LP objective is the global lower bound for every unexplored subtree.
+		_lowerBound = openNodes.top().getObjective();
+		reportBranchAndPriceBounds();
+
+		if (isIntegerBoundClosed())
+		{
+			_terminatedByIntegerBound = true;
+			break;
+		}
+
+		// Expanding one fractional node requires solving both children. Keep the
+		// current node in the frontier if the remaining node budget is too small;
+		// its LP objective then remains a valid lower bound for that subtree.
+		if (_processedBranchAndPriceNodes + 2 > _maxBranchAndPriceNodes)
+		{
+			_stoppedAtNodeLimit = true;
+			break;
+		}
+
 		BPNode current = openNodes.top();
 		openNodes.pop();
-
-		// The global column pool can grow while other nodes are evaluated. If
-		// this node was solved with an older pool, refresh its LP bound before
-		// using it for branching.
-		//if (!current.isSolvedWithPatternCount(static_cast<int>(_patterns.size())))
-		//{
-		//	if (evaluateBPNode(current))
-		//	{
-		//		openNodes.push(current);
-		//	}
-		//	continue;
-		//}
 
 		if (current.getObjective() >= _bestObjective - Utility::RC_EPS)
 		{
@@ -627,9 +686,30 @@ void Controller::solveBranchAndPriceNode(const BPNode& node)
 			openNodes.push(upNode);
 		}
 
+		// The down branch has not been solved yet, so the parent LP objective is
+		// still a valid lower bound for that entire subtree. If the up branch has
+		// produced an incumbent and the integer bound is already closed, stop
+		// before spending another node evaluation on the sibling.
+		_lowerBound = current.getObjective();
+		if (hasBranchAndPriceIncumbent() && isIntegerBoundClosed())
+		{
+			reportBranchAndPriceBounds();
+			_terminatedByIntegerBound = true;
+			break;
+		}
+
 		if (evaluateBPNode(downNode))
 		{
 			openNodes.push(downNode);
+		}
+	}
+
+	if (!_terminatedByIntegerBound && openNodes.empty())
+	{
+		_searchTreeExhausted = true;
+		if (hasBranchAndPriceIncumbent())
+		{
+			_lowerBound = _bestObjective;
 		}
 	}
 }
@@ -658,11 +738,26 @@ void Controller::reportBranchAndPriceSolution()
 			}
 		}
 	}
+	cout << "Global LP lower bound = " << _lowerBound << endl;
+	cout << "Global integer lower bound = "
+		<< ceil(_lowerBound - Utility::BP_BOUND_EPS) << endl;
+	if (hasBranchAndPriceIncumbent())
+	{
+		cout << "Global upper bound = " << _bestObjective << endl;
+	}
 	cout << "Processed " << _processedBranchAndPriceNodes << " branch-and-price nodes" << endl;
 	cout << "Generated " << _patterns.size() << " patterns" << endl;
-	if (_processedBranchAndPriceNodes >= _maxBranchAndPriceNodes)
+	if (_terminatedByIntegerBound)
+	{
+		cout << "Branching stopped because the integer lower bound reached the incumbent" << endl;
+	}
+	else if (_stoppedAtNodeLimit)
 	{
 		cout << "Warning, branch-and-price stopped at the node limit" << endl;
+	}
+	else if (_searchTreeExhausted && hasBranchAndPriceIncumbent())
+	{
+		cout << "Optimality proven after exhausting the branch-and-price tree" << endl;
 	}
 	cout << endl;
 }
@@ -856,6 +951,10 @@ void Controller::solveBP()
 	_bestSolution.clear();
 	_bestNodeId = -1;
 	_bestNodeDepth = -1;
+	_lowerBound = 0;
+	_terminatedByIntegerBound = false;
+	_stoppedAtNodeLimit = false;
+	_searchTreeExhausted = false;
 	_processedBranchAndPriceNodes = 0;
 	_nextBranchAndPriceSequence = 0;
 

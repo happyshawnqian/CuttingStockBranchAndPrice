@@ -91,6 +91,10 @@ private:
 	vector<double> _bestSolution;
 	int _bestNodeId;
 	int _bestNodeDepth;
+	double _lowerBound;
+	bool _terminatedByIntegerBound;
+	bool _stoppedAtNodeLimit;
+	bool _searchTreeExhausted;
 
 	int _processedBranchAndPriceNodes;
 	int _maxBranchAndPriceNodes;
@@ -127,6 +131,9 @@ private:
 	void createChildNodes(const BPNode& node, int branchIndex, BPNode& downNode, BPNode& upNode);
 	void solveBranchAndPriceNode(const BPNode& node);
 	int findFractionalPatternIndex(const vector<double>& values);
+	bool hasBranchAndPriceIncumbent() const;
+	bool isIntegerBoundClosed() const;
+	void reportBranchAndPriceBounds() const;
 	void reportBranchAndPriceSolution();
 
 public:
