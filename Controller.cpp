@@ -666,7 +666,7 @@ void Controller::solveBranchAndPriceNode(const BPNode& node)
 		}
 
 		int branchIndex = findFractionalPatternIndex(current.getValues());
-		if (branchIndex < 0)
+		/*if (branchIndex < 0)
 		{
 			_bestObjective = current.getObjective();
 			_bestSolution = current.getValues();
@@ -675,7 +675,7 @@ void Controller::solveBranchAndPriceNode(const BPNode& node)
 			cout << "New incumbent uses " << _bestObjective << " rolls at node id "
 				<< current.getId() << " on level " << current.getDepth() << endl;
 			continue;
-		}
+		}*/
 
 		BPNode upNode;
 		BPNode downNode;
