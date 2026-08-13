@@ -53,6 +53,44 @@ void Subproblem::initialize()
 	_patGen.add(_Width);
 }
 
+void Subproblem::validateItemPair(int firstItemIndex, int secondItemIndex) const
+{
+	int itemCount = static_cast<int>(_products.size());
+	if (firstItemIndex < 0 || firstItemIndex >= itemCount
+		|| secondItemIndex < 0 || secondItemIndex >= itemCount
+		|| firstItemIndex == secondItemIndex)
+	{
+		cout << "Error, invalid item pair for a Ryan-Foster constraint" << endl;
+		exit(1);
+	}
+}
+
+void Subproblem::addTogetherConstraint(int firstItemIndex, int secondItemIndex)
+{
+	validateItemPair(firstItemIndex, secondItemIndex);
+
+	// Together branch: a feasible pattern contains both items or neither item.
+	IloExpr relation(_env);
+	relation += _Use[firstItemIndex] - _Use[secondItemIndex];
+	string constraintName = "rfTogether_" + to_string(firstItemIndex)
+		+ "_" + to_string(secondItemIndex);
+	_patGen.add(IloRange(_env, 0, relation, 0, constraintName.c_str()));
+	relation.end();
+}
+
+void Subproblem::addSeparateConstraint(int firstItemIndex, int secondItemIndex)
+{
+	validateItemPair(firstItemIndex, secondItemIndex);
+
+	// Separate branch: no feasible pattern may contain both items.
+	IloExpr relation(_env);
+	relation += _Use[firstItemIndex] + _Use[secondItemIndex];
+	string constraintName = "rfSeparate_" + to_string(firstItemIndex)
+		+ "_" + to_string(secondItemIndex);
+	_patGen.add(IloRange(_env, -IloInfinity, relation, 1, constraintName.c_str()));
+	relation.end();
+}
+
 void Subproblem::addExcludedPattern(Pattern* pattern)
 {
 	// Exclude exactly one binary item subset with a Hamming-distance constraint:

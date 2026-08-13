@@ -11,30 +11,29 @@ using namespace std;
 class BPNode
 {
 public:
-	struct PatternBound
+	enum class RyanFosterBranchType
 	{
-		// Signature is a stable textual representation of the pattern content,
-		// for example "2,0,1". It is used instead of Pattern::_id so that the
-		// same cutting pattern is recognized even if generated as a new object.
-		string signature;
+		Together,
+		Separate
+	};
 
-		// Bounds apply to the master variable x_pattern, i.e. the number of
-		// times this cutting pattern may be used in the current branch node.
-		// upperBound == -1 means no additional branch-specific upper bound.
-		// The binary master still applies its base upper bound of 1.
-		int lowerBound;
-		int upperBound;
+	struct RyanFosterConstraint
+	{
+		// Product indices identify distinct unit-demand items. The first index is
+		// always smaller so the same pair has one canonical representation.
+		int firstItemIndex;
+		int secondItemIndex;
+		RyanFosterBranchType branchType;
 	};
 
 	BPNode();
 	BPNode(int depth);
 
-	void addBound(const string& signature, int lowerBound, int upperBound);
-	void setEvaluation(const vector<double>& values, double objective, int patternCount, int sequence);
-	bool isEvaluated() const;
-	bool isSolvedWithPatternCount(int patternCount) const;
+	void addRyanFosterConstraint(int firstItemIndex, int secondItemIndex,
+		RyanFosterBranchType branchType);
+	void setEvaluation(const vector<double>& values, double objective, int sequence);
 
-	const vector<PatternBound>& getBounds() const;
+	const vector<RyanFosterConstraint>& getRyanFosterConstraints() const;
 	const vector<double>& getValues() const;
 	int getId() const;
 	double getObjective() const;
@@ -48,18 +47,15 @@ private:
 	int _id;
 	static int _counter;
 
-	// Branching is implemented by adding bounds on pattern variables.
-	// Each child node inherits all parent bounds and adds one more bound.
-	vector<PatternBound> _bounds;
+	// Each child inherits all parent pair decisions and adds one new decision.
+	vector<RyanFosterConstraint> _ryanFosterConstraints;
 
 	// LP information for best-first search. These fields are filled after the
 	// node's restricted master is solved by column generation.
 	vector<double> _values;
 	double _objective;
-	int _patternCount;
 	int _sequence;
 	int _depth;
-	bool _evaluated;
 };
 
 class BPNodeCompare
@@ -71,6 +67,13 @@ public:
 class Controller
 {
 private:
+	struct RyanFosterPair
+	{
+		int firstItemIndex;
+		int secondItemIndex;
+		double togetherValue;
+	};
+
 	// The controller coordinates data loading, column generation, and the
 	// branch-and-price search. The Problem object owns the logical instance;
 	// the two solver objects are rebuilt whenever the active model must be
@@ -116,22 +119,28 @@ private:
 	void syncProblemToSolvers();
 	void validateProblemReady();
 
-	// Pattern signatures are used for duplicate detection and node branching.
+	// Pattern signatures are used for duplicate detection in the global pool.
 	string getPatternSignature(Pattern* pattern);
 	string getPatternSignature(const vector<int>& counts);
 	bool isKnownPattern(Pattern* pattern);
 	bool isKnownPatternSignature(const string& signature);
 
-	// Branch-node bounds are translated into bounds within the base [0, 1]
-	// domain when a node's restricted master problem is built.
-	bool getPatternBounds(const BPNode& node, Pattern* pattern, double& lowerBound, double& upperBound);
+	// Ryan-Foster decisions restrict the columns available at each node.
+	bool patternContainsItem(Pattern* pattern, int itemIndex) const;
+	bool isPatternCompatibleWithNode(const BPNode& node, Pattern* pattern) const;
+	void applyRyanFosterConstraints(const BPNode& node, Subproblem& subproblem) const;
+	string getItemDescription(int itemIndex) const;
 
 	// Branch-and-price search helpers.
 	bool solveColumnGenerationAtNode(const BPNode& node, vector<double>& values, double& objective);
 	bool evaluateBPNode(BPNode& node);
-	void createChildNodes(const BPNode& node, int branchIndex, BPNode& downNode, BPNode& upNode);
+	bool isIntegerPatternSolution(const vector<double>& values) const;
+	bool findRyanFosterPair(const vector<double>& values, RyanFosterPair& pair) const;
+	void createRyanFosterChildNodes(const BPNode& node, const RyanFosterPair& pair,
+		BPNode& togetherNode, BPNode& separateNode);
+	void reportRyanFosterBranch(const BPNode& node, const RyanFosterPair& pair,
+		const BPNode& togetherNode, const BPNode& separateNode) const;
 	void solveBranchAndPriceNode(const BPNode& node);
-	int findFractionalPatternIndex(const vector<double>& values);
 	bool hasBranchAndPriceIncumbent() const;
 	bool isIntegerBoundClosed() const;
 	void reportBranchAndPriceBounds() const;
@@ -153,7 +162,7 @@ public:
 
 	void solveCG();	// Solve the LP relaxation by column generation only.
 	void solveIP();	// Solve an integer restricted master using generated columns.
-	void solveBP();	// Solve with branch-and-price over pattern variables.
+	void solveBP();	// Solve with Ryan-Foster branch-and-price.
 	vector<Pattern* > findInitialPatterns(); // Generate one simple pattern per product.
 
 };

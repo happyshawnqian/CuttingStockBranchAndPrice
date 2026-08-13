@@ -11,10 +11,8 @@ BPNode::BPNode()
 	_id = _counter;
 	_counter++;
 	_objective = 0;
-	_patternCount = 0;
 	_sequence = 0;
 	_depth = 0;
-	_evaluated = false;
 }
 
 BPNode::BPNode(int depth)
@@ -22,43 +20,55 @@ BPNode::BPNode(int depth)
 	_id = _counter;
 	_counter++;
 	_objective = 0;
-	_patternCount = 0;
 	_sequence = 0;
 	_depth = depth;
-	_evaluated = false;
 }
 
-void BPNode::addBound(const string& signature, int lowerBound, int upperBound)
+void BPNode::addRyanFosterConstraint(int firstItemIndex, int secondItemIndex,
+	RyanFosterBranchType branchType)
 {
-	PatternBound bound;
-	bound.signature = signature;
-	bound.lowerBound = lowerBound;
-	bound.upperBound = upperBound;
-	_bounds.push_back(bound);
+	if (firstItemIndex == secondItemIndex)
+	{
+		cout << "Error, a Ryan-Foster constraint requires two different items" << endl;
+		exit(1);
+	}
+	if (firstItemIndex > secondItemIndex)
+	{
+		int temporaryIndex = firstItemIndex;
+		firstItemIndex = secondItemIndex;
+		secondItemIndex = temporaryIndex;
+	}
+	for (auto constraint : _ryanFosterConstraints)
+	{
+		if (constraint.firstItemIndex == firstItemIndex
+			&& constraint.secondItemIndex == secondItemIndex)
+		{
+			if (constraint.branchType == branchType)
+			{
+				return;
+			}
+			cout << "Error, conflicting Ryan-Foster decisions for the same item pair" << endl;
+			exit(1);
+		}
+	}
+
+	RyanFosterConstraint constraint;
+	constraint.firstItemIndex = firstItemIndex;
+	constraint.secondItemIndex = secondItemIndex;
+	constraint.branchType = branchType;
+	_ryanFosterConstraints.push_back(constraint);
 }
 
-void BPNode::setEvaluation(const vector<double>& values, double objective, int patternCount, int sequence)
+void BPNode::setEvaluation(const vector<double>& values, double objective, int sequence)
 {
 	_values = values;
 	_objective = objective;
-	_patternCount = patternCount;
 	_sequence = sequence;
-	_evaluated = true;
 }
 
-bool BPNode::isEvaluated() const
+const vector<BPNode::RyanFosterConstraint>& BPNode::getRyanFosterConstraints() const
 {
-	return _evaluated;
-}
-
-bool BPNode::isSolvedWithPatternCount(int patternCount) const
-{
-	return _evaluated && _patternCount == patternCount;
-}
-
-const vector<BPNode::PatternBound>& BPNode::getBounds() const
-{
-	return _bounds;
+	return _ryanFosterConstraints;
 }
 
 const vector<double>& BPNode::getValues() const
@@ -91,9 +101,7 @@ void BPNode::setDepth(int depth)
 	_depth = depth;
 	_values.clear();
 	_objective = 0;
-	_patternCount = 0;
 	_sequence = 0;
-	_evaluated = false;
 }
 
 bool BPNodeCompare::operator()(const BPNode& left, const BPNode& right) const
@@ -388,38 +396,75 @@ bool Controller::isKnownPatternSignature(const string& signature)
 	return false;
 }
 
-bool Controller::getPatternBounds(const BPNode& node, Pattern* pattern, double& lowerBound, double& upperBound)
+bool Controller::patternContainsItem(Pattern* pattern, int itemIndex) const
 {
-	// A node can inherit multiple bounds for the same pattern. The effective
-	// lower bound is the maximum lower bound; the effective upper bound starts
-	// at the binary master limit of 1 and includes inherited branch bounds.
-	string signature = getPatternSignature(pattern);
-	int lower = 0;
-	int upper = 1;
-
-	for (auto bound : node.getBounds())
-	{
-		if (bound.signature == signature)
-		{
-			if (bound.lowerBound > lower)
-			{
-				lower = bound.lowerBound;
-			}
-			if (bound.upperBound >= 0 && bound.upperBound < upper)
-			{
-				upper = bound.upperBound;
-			}
-		}
-	}
-
-	if (upper >= 0 && lower > upper)
+	if (pattern == nullptr)
 	{
 		return false;
 	}
 
-	lowerBound = lower;
-	upperBound = upper;
+	for (auto content : pattern->getContent())
+	{
+		if (content.first == itemIndex && content.second == 1)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+bool Controller::isPatternCompatibleWithNode(const BPNode& node, Pattern* pattern) const
+{
+	for (auto constraint : node.getRyanFosterConstraints())
+	{
+		bool containsFirst = patternContainsItem(pattern, constraint.firstItemIndex);
+		bool containsSecond = patternContainsItem(pattern, constraint.secondItemIndex);
+
+		if (constraint.branchType == BPNode::RyanFosterBranchType::Together
+			&& containsFirst != containsSecond)
+		{
+			return false;
+		}
+		if (constraint.branchType == BPNode::RyanFosterBranchType::Separate
+			&& containsFirst && containsSecond)
+		{
+			return false;
+		}
+	}
 	return true;
+}
+
+void Controller::applyRyanFosterConstraints(const BPNode& node, Subproblem& subproblem) const
+{
+	for (auto constraint : node.getRyanFosterConstraints())
+	{
+		if (constraint.branchType == BPNode::RyanFosterBranchType::Together)
+		{
+			subproblem.addTogetherConstraint(
+				constraint.firstItemIndex, constraint.secondItemIndex);
+		}
+		else
+		{
+			subproblem.addSeparateConstraint(
+				constraint.firstItemIndex, constraint.secondItemIndex);
+		}
+	}
+}
+
+string Controller::getItemDescription(int itemIndex) const
+{
+	ostringstream description;
+	description << "item " << itemIndex;
+
+	vector<PaperRoll* > products = _problem->getProducts();
+	if (itemIndex >= 0 && itemIndex < static_cast<int>(products.size()))
+	{
+		PaperRoll* product = products[itemIndex];
+		description << " [source " << product->getSourceProductIndex()
+			<< ", copy " << product->getCopyIndex()
+			<< ", width " << product->getWidth() << "]";
+	}
+	return description.str();
 }
 
 bool Controller::solveColumnGenerationAtNode(const BPNode& node, vector<double>& values, double& objective)
@@ -436,20 +481,22 @@ bool Controller::solveColumnGenerationAtNode(const BPNode& node, vector<double>&
 
 	for (auto pattern : _patterns)
 	{
-		double lowerBound = 0;
-		double upperBound = 1;
-		if (!getPatternBounds(node, pattern, lowerBound, upperBound))
-		{
-			return false;
-		}
-		master.addColumn(pattern, lowerBound, upperBound);
+		double upperBound = isPatternCompatibleWithNode(node, pattern) ? 1 : 0;
+		master.addColumn(pattern, 0, upperBound);
 	}
 
 	Subproblem subproblem;
 	subproblem.setMaterials(_problem->getMaterials());
 	subproblem.setProducts(_problem->getProducts());
 	subproblem.initialize();
-	subproblem.addExcludedPatterns(_patterns);
+	applyRyanFosterConstraints(node, subproblem);
+	for (auto pattern : _patterns)
+	{
+		if (isPatternCompatibleWithNode(node, pattern))
+		{
+			subproblem.addExcludedPattern(pattern);
+		}
+	}
 
 	while (true)
 	{
@@ -472,6 +519,13 @@ bool Controller::solveColumnGenerationAtNode(const BPNode& node, vector<double>&
 		}
 
 		Pattern* newPattern = subproblem.getPattern();
+		if (!isPatternCompatibleWithNode(node, newPattern))
+		{
+			cout << "Error, pricing generated a pattern that violates the current "
+				<< "Ryan-Foster constraints" << endl;
+			delete newPattern;
+			return false;
+		}
 
 #ifdef DEBUG
 		cout << "************* new pattern *************" << endl;
@@ -481,26 +535,31 @@ bool Controller::solveColumnGenerationAtNode(const BPNode& node, vector<double>&
 
 		if (isKnownPattern(newPattern))
 		{
-			// A duplicate column must not be added under a new Pattern id,
-			// otherwise branch bounds on this pattern signature could be bypassed.
+			// Keep one object for each item subset in the global pattern pool.
+			// The no-good cut asks pricing for the next distinct feasible subset.
 			subproblem.addExcludedPattern(newPattern);
 			delete newPattern;
 			continue;
 		}
 
 		_patterns.push_back(newPattern);
-		double lowerBound = 0;
-		double upperBound = 1;
-		if (!getPatternBounds(node, newPattern, lowerBound, upperBound))
-		{
-			return false;
-		}
-		master.addColumn(newPattern, lowerBound, upperBound);
+		master.addColumn(newPattern, 0, 1);
 		subproblem.addExcludedPattern(newPattern);
 	}
 
 	values = master.getValues();
 	objective = master.getObjectiveValue();
+	for (int patternIndex = 0;
+		patternIndex < static_cast<int>(values.size()); patternIndex++)
+	{
+		if (values[patternIndex] > Utility::RC_EPS
+			&& !isPatternCompatibleWithNode(node, _patterns[patternIndex]))
+		{
+			cout << "Error, a positive master pattern violates the current "
+				<< "Ryan-Foster constraints" << endl;
+			return false;
+		}
+	}
 	if (master.getArtificialUsage() > Utility::RC_EPS)
 	{
 		// Artificial usage means real generated columns cannot satisfy this
@@ -511,19 +570,92 @@ bool Controller::solveColumnGenerationAtNode(const BPNode& node, vector<double>&
 	return true;
 }
 
-int Controller::findFractionalPatternIndex(const vector<double>& values)
+bool Controller::isIntegerPatternSolution(const vector<double>& values) const
 {
-	// Branch on the first fractional master variable. This is a simple pattern
-	// variable branching rule; stronger rules such as Ryan-Foster are possible.
-	for (int i = 0; i < static_cast<int>(values.size()); i++)
+	for (auto value : values)
 	{
-		double rounded = floor(values[i] + 0.5);
-		if (fabs(values[i] - rounded) > Utility::RC_EPS)
+		double roundedValue = floor(value + 0.5);
+		if (fabs(value - roundedValue) > Utility::RC_EPS)
 		{
-			return i;
+			return false;
 		}
 	}
-	return -1;
+	return true;
+}
+
+bool Controller::findRyanFosterPair(const vector<double>& values, RyanFosterPair& pair) const
+{
+	int itemCount = static_cast<int>(_problem->getProducts().size());
+	int patternCount = static_cast<int>(values.size());
+	if (patternCount > static_cast<int>(_patterns.size()))
+	{
+		return false;
+	}
+
+	vector<vector<double>> togetherValues(
+		itemCount, vector<double>(itemCount, 0));
+	for (int patternIndex = 0; patternIndex < patternCount; patternIndex++)
+	{
+		double patternValue = values[patternIndex];
+		if (patternValue <= Utility::RC_EPS)
+		{
+			continue;
+		}
+
+		vector<int> patternItems;
+		for (auto content : _patterns[patternIndex]->getContent())
+		{
+			if (content.second == 1 && content.first >= 0 && content.first < itemCount)
+			{
+				patternItems.push_back(content.first);
+			}
+		}
+
+		for (int firstPosition = 0;
+			firstPosition < static_cast<int>(patternItems.size()); firstPosition++)
+		{
+			for (int secondPosition = firstPosition + 1;
+				secondPosition < static_cast<int>(patternItems.size()); secondPosition++)
+			{
+				int firstItemIndex = patternItems[firstPosition];
+				int secondItemIndex = patternItems[secondPosition];
+				if (firstItemIndex > secondItemIndex)
+				{
+					int temporaryIndex = firstItemIndex;
+					firstItemIndex = secondItemIndex;
+					secondItemIndex = temporaryIndex;
+				}
+				togetherValues[firstItemIndex][secondItemIndex] += patternValue;
+			}
+		}
+	}
+
+	bool pairFound = false;
+	double bestDistance = 1.0e100;
+	for (int firstItemIndex = 0; firstItemIndex < itemCount; firstItemIndex++)
+	{
+		for (int secondItemIndex = firstItemIndex + 1;
+			secondItemIndex < itemCount; secondItemIndex++)
+		{
+			double togetherValue = togetherValues[firstItemIndex][secondItemIndex];
+			if (togetherValue <= Utility::RC_EPS
+				|| togetherValue >= 1 - Utility::RC_EPS)
+			{
+				continue;
+			}
+
+			double distance = fabs(togetherValue - 0.5);
+			if (!pairFound || distance < bestDistance - Utility::RC_EPS)
+			{
+				pair.firstItemIndex = firstItemIndex;
+				pair.secondItemIndex = secondItemIndex;
+				pair.togetherValue = togetherValue;
+				bestDistance = distance;
+				pairFound = true;
+			}
+		}
+	}
+	return pairFound;
 }
 
 bool Controller::evaluateBPNode(BPNode& node)
@@ -550,7 +682,7 @@ bool Controller::evaluateBPNode(BPNode& node)
 		return false;
 	}
 
-	if (findFractionalPatternIndex(values) < 0)
+	if (isIntegerPatternSolution(values))
 	{
 		_bestObjective = objective;
 		_bestSolution = values;
@@ -561,34 +693,42 @@ bool Controller::evaluateBPNode(BPNode& node)
 		return false;
 	}
 
-	node.setEvaluation(values, objective, static_cast<int>(_patterns.size()), _nextBranchAndPriceSequence);
+	node.setEvaluation(values, objective, _nextBranchAndPriceSequence);
 	_nextBranchAndPriceSequence++;
 	return true;
 }
 
-void Controller::createChildNodes(const BPNode& node, int branchIndex, BPNode& downNode, BPNode& upNode)
+void Controller::createRyanFosterChildNodes(const BPNode& node, const RyanFosterPair& pair,
+	BPNode& togetherNode, BPNode& separateNode)
 {
-	double value = node.getValues()[branchIndex];
-	int floorValue = static_cast<int>(floor(value));
-	int ceilValue = floorValue + 1;
-	string signature = getPatternSignature(_patterns[branchIndex]);
-
-	// Split the fractional variable x_p = value into:
-	//   down: x_p <= floor(value)
-	//   up:   x_p >= ceil(value)
-	downNode.setDepth(node.getDepth() + 1);
-	for (auto bound : node.getBounds())
+	togetherNode.setDepth(node.getDepth() + 1);
+	for (auto constraint : node.getRyanFosterConstraints())
 	{
-		downNode.addBound(bound.signature, bound.lowerBound, bound.upperBound);
+		togetherNode.addRyanFosterConstraint(constraint.firstItemIndex,
+			constraint.secondItemIndex, constraint.branchType);
 	}
-	downNode.addBound(signature, 0, floorValue);
+	togetherNode.addRyanFosterConstraint(pair.firstItemIndex, pair.secondItemIndex,
+		BPNode::RyanFosterBranchType::Together);
 
-	upNode.setDepth(node.getDepth() + 1);
-	for (auto bound : node.getBounds())
+	separateNode.setDepth(node.getDepth() + 1);
+	for (auto constraint : node.getRyanFosterConstraints())
 	{
-		upNode.addBound(bound.signature, bound.lowerBound, bound.upperBound);
+		separateNode.addRyanFosterConstraint(constraint.firstItemIndex,
+			constraint.secondItemIndex, constraint.branchType);
 	}
-	upNode.addBound(signature, ceilValue, -1);
+	separateNode.addRyanFosterConstraint(pair.firstItemIndex, pair.secondItemIndex,
+		BPNode::RyanFosterBranchType::Separate);
+}
+
+void Controller::reportRyanFosterBranch(const BPNode& node, const RyanFosterPair& pair,
+	const BPNode& togetherNode, const BPNode& separateNode) const
+{
+	cout << "Ryan-Foster branch at node id " << node.getId() << ": "
+		<< getItemDescription(pair.firstItemIndex) << " and "
+		<< getItemDescription(pair.secondItemIndex)
+		<< ", together value = " << pair.togetherValue << endl;
+	cout << "  Together child node id " << togetherNode.getId()
+		<< ", separate child node id " << separateNode.getId() << endl;
 }
 
 bool Controller::hasBranchAndPriceIncumbent() const
@@ -667,31 +807,30 @@ void Controller::solveBranchAndPriceNode(const BPNode& node)
 			continue;
 		}
 
-		int branchIndex = findFractionalPatternIndex(current.getValues());
-		/*if (branchIndex < 0)
+		RyanFosterPair branchPair;
+		if (!findRyanFosterPair(current.getValues(), branchPair))
 		{
-			_bestObjective = current.getObjective();
-			_bestSolution = current.getValues();
-			_bestNodeId = current.getId();
-			_bestNodeDepth = current.getDepth();
-			cout << "New incumbent uses " << _bestObjective << " rolls at node id "
-				<< current.getId() << " on level " << current.getDepth() << endl;
-			continue;
-		}*/
-
-		BPNode upNode;
-		BPNode downNode;
-		createChildNodes(current, branchIndex, downNode, upNode);
-
-		if (evaluateBPNode(upNode))
-		{
-			openNodes.push(upNode);
+			cout << "Error, node id " << current.getId()
+				<< " has fractional pattern variables but no fractional "
+				<< "Ryan-Foster item pair" << endl;
+			exit(1);
 		}
 
-		// The down branch has not been solved yet, so the parent LP objective is
-		// still a valid lower bound for that entire subtree. If the up branch has
-		// produced an incumbent and the integer bound is already closed, stop
-		// before spending another node evaluation on the sibling.
+		BPNode togetherNode;
+		BPNode separateNode;
+		createRyanFosterChildNodes(
+			current, branchPair, togetherNode, separateNode);
+		reportRyanFosterBranch(
+			current, branchPair, togetherNode, separateNode);
+
+		if (evaluateBPNode(togetherNode))
+		{
+			openNodes.push(togetherNode);
+		}
+
+		// The separate branch has not been solved yet, so the parent LP objective
+		// remains a valid lower bound for that subtree. If the together branch has
+		// produced a closing incumbent, avoid evaluating the sibling.
 		_lowerBound = current.getObjective();
 		if (hasBranchAndPriceIncumbent() && isIntegerBoundClosed())
 		{
@@ -700,9 +839,9 @@ void Controller::solveBranchAndPriceNode(const BPNode& node)
 			break;
 		}
 
-		if (evaluateBPNode(downNode))
+		if (evaluateBPNode(separateNode))
 		{
-			openNodes.push(downNode);
+			openNodes.push(separateNode);
 		}
 	}
 
@@ -813,7 +952,7 @@ void Controller::loadProducts(string dataDir)
 	//   demand - number of identical items to create
 	// Each created PaperRoll is a distinct unit-demand item. Keeping copies
 	// distinct is required by the binary set-partitioning formulation and by
-	// future Ryan-Foster branching on pairs of items.
+	// Ryan-Foster branching on pairs of unit-demand items.
 	Json::Reader reader;
 	Json::Value root;
 	string paramDataFile = dataDir + "products.json";

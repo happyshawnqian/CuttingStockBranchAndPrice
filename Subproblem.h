@@ -28,6 +28,8 @@ private:
 	IloRange _Width;
 	IloCplex _patSolver;
 
+	void validateItemPair(int firstItemIndex, int secondItemIndex) const;
+
 public:
 	Subproblem();
 	~Subproblem();
@@ -41,6 +43,8 @@ public:
 	// A forbidden pattern must differ in at least one item-selection bit.
 	void addExcludedPattern(Pattern* pattern);
 	void addExcludedPatterns(const vector<Pattern* >& patterns);
+	void addTogetherConstraint(int firstItemIndex, int secondItemIndex);
+	void addSeparateConstraint(int firstItemIndex, int secondItemIndex);
 
 	void setObjective(const vector<double>& duals);	// get duals from master problem, and set objective
 	bool solve();
