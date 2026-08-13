@@ -318,9 +318,10 @@ void Controller::validateProblemReady()
 			cout << "Error, product width must be positive" << endl;
 			exit(1);
 		}
-		if (product->getNumber() <= 0)
+		if (product->getNumber() != 1)
 		{
-			cout << "Error, product demand must be positive" << endl;
+			cout << "Error, every product must be a unit-demand item; "
+				<< "split aggregate demand before solving" << endl;
 			exit(1);
 		}
 		if (product->getWidth() > materialWidth)
@@ -333,8 +334,9 @@ void Controller::validateProblemReady()
 
 string Controller::getPatternSignature(Pattern* pattern)
 {
-	// Convert sparse Pattern content into a dense count vector ordered by
-	// product index. This makes logically identical patterns compare equal.
+	// Convert sparse Pattern content into a dense binary vector ordered by item
+	// index. Equal-width copies remain distinct because they have different
+	// positions in this vector.
 	int nWdth = 0;
 	if (_problem != nullptr)
 	{
@@ -358,8 +360,8 @@ string Controller::getPatternSignature(Pattern* pattern)
 
 string Controller::getPatternSignature(const vector<int>& counts)
 {
-	// A comma-separated vector is sufficient here because product counts are
-	// non-negative integers and product order is fixed by the input data.
+	// A comma-separated vector is sufficient because entries are binary and the
+	// order of the unit-demand items is fixed by the expanded input data.
 	ostringstream signature;
 	for (int i = 0; i < static_cast<int>(counts.size()); i++)
 	{
@@ -389,11 +391,11 @@ bool Controller::isKnownPatternSignature(const string& signature)
 bool Controller::getPatternBounds(const BPNode& node, Pattern* pattern, double& lowerBound, double& upperBound)
 {
 	// A node can inherit multiple bounds for the same pattern. The effective
-	// lower bound is the maximum lower bound; the effective upper bound is the
-	// minimum finite upper bound.
+	// lower bound is the maximum lower bound; the effective upper bound starts
+	// at the binary master limit of 1 and includes inherited branch bounds.
 	string signature = getPatternSignature(pattern);
 	int lower = 0;
-	int upper = -1;
+	int upper = 1;
 
 	for (auto bound : node.getBounds())
 	{
@@ -403,7 +405,7 @@ bool Controller::getPatternBounds(const BPNode& node, Pattern* pattern, double& 
 			{
 				lower = bound.lowerBound;
 			}
-			if (bound.upperBound >= 0 && (upper < 0 || bound.upperBound < upper))
+			if (bound.upperBound >= 0 && bound.upperBound < upper)
 			{
 				upper = bound.upperBound;
 			}
@@ -416,7 +418,7 @@ bool Controller::getPatternBounds(const BPNode& node, Pattern* pattern, double& 
 	}
 
 	lowerBound = lower;
-	upperBound = upper >= 0 ? upper : IloInfinity;
+	upperBound = upper;
 	return true;
 }
 
@@ -435,7 +437,7 @@ bool Controller::solveColumnGenerationAtNode(const BPNode& node, vector<double>&
 	for (auto pattern : _patterns)
 	{
 		double lowerBound = 0;
-		double upperBound = IloInfinity;
+		double upperBound = 1;
 		if (!getPatternBounds(node, pattern, lowerBound, upperBound))
 		{
 			return false;
@@ -460,7 +462,7 @@ bool Controller::solveColumnGenerationAtNode(const BPNode& node, vector<double>&
 
 		vector<double> duals = master.getDuals();
 		subproblem.setObjective(duals);
-		if (!subproblem.solve())
+		if (!subproblem.solve(false))
 		{
 			break;
 		}
@@ -488,7 +490,7 @@ bool Controller::solveColumnGenerationAtNode(const BPNode& node, vector<double>&
 
 		_patterns.push_back(newPattern);
 		double lowerBound = 0;
-		double upperBound = IloInfinity;
+		double upperBound = 1;
 		if (!getPatternBounds(node, newPattern, lowerBound, upperBound))
 		{
 			return false;
@@ -502,7 +504,7 @@ bool Controller::solveColumnGenerationAtNode(const BPNode& node, vector<double>&
 	if (master.getArtificialUsage() > Utility::RC_EPS)
 	{
 		// Artificial usage means real generated columns cannot satisfy this
-		// branch node's demand and bounds, so the node is infeasible.
+		// branch node's exact-cover rows and bounds, so the node is infeasible.
 		return false;
 	}
 
@@ -807,8 +809,11 @@ void Controller::loadMaterials(string dataDir)
 void Controller::loadProducts(string dataDir)
 {
 	// Product JSON fields:
-	//   width  - demanded product width
-	//   demand - required number of pieces
+	//   width  - item width
+	//   demand - number of identical items to create
+	// Each created PaperRoll is a distinct unit-demand item. Keeping copies
+	// distinct is required by the binary set-partitioning formulation and by
+	// future Ryan-Foster branching on pairs of items.
 	Json::Reader reader;
 	Json::Value root;
 	string paramDataFile = dataDir + "products.json";
@@ -838,8 +843,13 @@ void Controller::loadProducts(string dataDir)
 			exit(1);
 		}
 
-		PaperRoll* paperRoll = new PaperRoll(width, demand, false);
-		products.push_back(paperRoll);
+		for (int copyIndex = 0; copyIndex < demand; copyIndex++)
+		{
+			PaperRoll* paperRoll = new PaperRoll(width, 1, false);
+			paperRoll->setSourceProductIndex(i);
+			paperRoll->setCopyIndex(copyIndex);
+			products.push_back(paperRoll);
+		}
 	}
 	_problem->setProducts(products);
 	_ownsProducts = true;
@@ -863,6 +873,7 @@ void Controller::solveCG()
 	vector<Pattern* > initialPatterns = findInitialPatterns();
 	_patterns.insert(_patterns.end(), initialPatterns.begin(), initialPatterns.end());
 	_masterProblem->addColumns(initialPatterns);
+	_subproblem->addExcludedPatterns(initialPatterns);
 
 	int iter = 0;
 
@@ -879,17 +890,25 @@ void Controller::solveCG()
 		vector<double> duals = _masterProblem->getDuals();
 
 		_subproblem->setObjective(duals);
-		if (!_subproblem->solve())
+		if (!_subproblem->solve(false))
 		{
-			exit(1);
+			break;
 		}
 		_subproblem->report();
 
 		if (_subproblem->getReducedCost() > -Utility::RC_EPS) break;
 
 		Pattern* newPattern = _subproblem->getPattern();
+		if (isKnownPattern(newPattern))
+		{
+			// This is a defensive check in addition to the binary no-good cuts.
+			_subproblem->addExcludedPattern(newPattern);
+			delete newPattern;
+			continue;
+		}
 		_patterns.push_back(newPattern);
 		_masterProblem->addColumn(newPattern);
+		_subproblem->addExcludedPattern(newPattern);
 
 		iter++;
 	}
@@ -897,22 +916,19 @@ void Controller::solveCG()
 
 vector<Pattern* > Controller::findInitialPatterns()
 {
-	// A basic feasible column set: one pattern per product, each pattern cutting
-	// as many pieces of that product as fit into one raw roll.
+	// A basic feasible column set: one singleton pattern per unit-demand item.
+	// These columns guarantee a feasible set-partitioning master before pricing
+	// starts combining compatible items into lower-cost patterns.
 	validateProblemReady();
 
-	vector<PaperRoll* > materials = _problem->getMaterials();
 	vector<PaperRoll* > products = _problem->getProducts();
-	int materialWidth = materials[0]->getWidth();
 	int numProduct = static_cast<int>(products.size());
 
 	vector<Pattern* > result;
 	for (int i = 0; i < numProduct; i++)
 	{
-		// create pattern
-		PaperRoll* paperRoll = products[i];
 		Pattern* newPattern = new Pattern();
-		newPattern->addContent(make_pair(i, materialWidth / paperRoll->getWidth()));
+		newPattern->addContent(make_pair(i, 1));
 		result.push_back(newPattern);
 
 #ifdef DEBUG

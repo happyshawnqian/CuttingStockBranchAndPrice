@@ -7,10 +7,9 @@
 
 // Restricted master problem for cutting stock.
 //
-// Rows enforce product demand, and each column represents one cutting pattern.
-// During column generation the pattern variables are continuous. solveIP()
-// converts the generated pattern variables to integer variables for the
-// restricted master heuristic.
+// Rows require each distinct item to be covered exactly once, and each column
+// represents one binary cutting pattern. During column generation the pattern
+// variables are continuous in [0, 1]. solveIP() converts them to binary.
 class MasterProblem : public Problem
 {
 private:
@@ -22,11 +21,11 @@ private:
 	// Objective: minimize the total cost / number of raw rolls used.
 	IloObjective _RollsUsed;
 
-	// Demand rows. _Fill[i] requires enough production for product i.
+	// Set-partitioning rows. _Fill[i] requires item i to be covered exactly once.
 	IloRangeArray _Fill;
 
-	// Real pattern variables x_p. Each variable counts how many times pattern p
-	// is used in the master problem.
+	// Real pattern variables x_p. Each variable selects a distinct item subset
+	// and has domain [0, 1] in the LP relaxation.
 	IloNumVarArray _Cut;
 
 	// Expensive fallback columns used in branch-and-price nodes. If any
@@ -47,7 +46,7 @@ public:
 	MasterProblem(const MasterProblem&) = delete;
 	MasterProblem& operator=(const MasterProblem&) = delete;
 
-	// Build demand constraints. Columns are added later by addColumn().
+	// Build exact-cover constraints. Columns are added later by addColumn().
 	void initialize();
 
 	// Add one expensive column per demand row so node LPs remain solvable while

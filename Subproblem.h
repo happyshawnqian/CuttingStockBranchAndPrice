@@ -7,10 +7,9 @@ using namespace std;
 
 // Pricing subproblem for column generation and branch-and-price.
 //
-// Given dual values from the master demand constraints, this model solves a
-// bounded knapsack problem and returns a cutting pattern with negative reduced
-// cost. Branch-and-price uses no-good constraints to avoid regenerating any
-// pattern already present in the global column pool.
+// Given dual values from the master exact-cover constraints, this model solves
+// a binary knapsack problem and returns an item subset with negative reduced
+// cost. No-good constraints prevent regeneration of known subsets.
 class Subproblem : public Problem
 {
 private:
@@ -19,11 +18,10 @@ private:
 	IloModel _patGen;
 
 	// Reduced cost objective:
-	// material cost - sum_i dual_i * number_of_product_i_in_pattern.
+	// material cost - sum_i dual_i * item_i_is_in_pattern.
 	IloObjective _ReducedCost;
 
-	// Integer decision variables a_i: how many pieces of product i are cut from
-	// one raw roll.
+	// Binary decision variables a_i: whether unit-demand item i is in the roll.
 	IloNumVarArray _Use;
 
 	// Width capacity constraint for one raw roll.
@@ -40,7 +38,7 @@ public:
 	void initialize();	// create variables and constraint, note that objective is not set
 
 	// Optional no-good constraints used to forbid an already generated pattern.
-	// A forbidden pattern must differ in at least one product count.
+	// A forbidden pattern must differ in at least one item-selection bit.
 	void addExcludedPattern(Pattern* pattern);
 	void addExcludedPatterns(const vector<Pattern* >& patterns);
 

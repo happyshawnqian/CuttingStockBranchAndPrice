@@ -18,8 +18,8 @@ Subproblem::~Subproblem()
 
 void Subproblem::initialize()
 {
-	// Create one integer variable per product. A feasible solution represents
-	// one cutting pattern that fits within the raw roll width.
+	// Create one binary variable per unit-demand item. A feasible solution is a
+	// subset of distinct items that fits within the raw roll width.
 	if (_materials.empty() || _products.empty())
 	{
 		cout << "Error, subproblem requires materials and products" << endl;
@@ -27,12 +27,17 @@ void Subproblem::initialize()
 	}
 	int rollWidth = _materials[0]->getWidth();
 
-	// a_i = number of pieces of product i in this candidate pattern.
+	// a_i = 1 exactly when item i belongs to this candidate pattern.
 	for (int i = 0; i < static_cast<int>(_products.size()); i++)
 	{
 		PaperRoll* product = _products[i];
+		if (product == nullptr || product->getNumber() != 1)
+		{
+			cout << "Error, subproblem requires unit-demand products" << endl;
+			exit(1);
+		}
 		string varName = "a_" + to_string(product->getId());
-		_Use.add(IloNumVar(_env, 0, IloInfinity, ILOINT, varName.c_str()));
+		_Use.add(IloNumVar(_env, 0, 1, ILOBOOL, varName.c_str()));
 	}
 
 	// Width capacity: sum_i width_i * a_i <= raw_roll_width.
@@ -50,47 +55,33 @@ void Subproblem::initialize()
 
 void Subproblem::addExcludedPattern(Pattern* pattern)
 {
-	// Add a no-good cut that forces the next solution to differ from the given
-	// pattern in at least one product count.
+	// Exclude exactly one binary item subset with a Hamming-distance constraint:
+	//   sum(i in S)(1 - a_i) + sum(i not in S)(a_i) >= 1.
 	if (pattern == nullptr || _materials.empty() || _products.empty()) return;
 
 	int nWdth = static_cast<int>(_products.size());
-	int rollWidth = _materials[0]->getWidth();
 	vector<int> target(nWdth, 0);
 	for (auto content : pattern->getContent())
 	{
 		if (content.first >= 0 && content.first < nWdth)
 		{
-			target[content.first] += content.second;
+			target[content.first] = 1;
 		}
 	}
 
 	IloExpr differs(_env);
-	bool hasAlternative = false;
 	for (int i = 0; i < nWdth; i++)
 	{
-		int maxUse = rollWidth / _products[i]->getWidth();
-		if (target[i] > 0)
+		if (target[i] == 1)
 		{
-			string lessName = "less_" + to_string(pattern->getId()) + "_" + to_string(i);
-			IloBoolVar less(_env, lessName.c_str());
-			differs += less;
-			_patGen.add(_Use[i] + maxUse * less <= target[i] - 1 + maxUse);
-			hasAlternative = true;
+			differs += 1 - _Use[i];
 		}
-		if (target[i] < maxUse)
+		else
 		{
-			string greaterName = "greater_" + to_string(pattern->getId()) + "_" + to_string(i);
-			IloBoolVar greater(_env, greaterName.c_str());
-			differs += greater;
-			_patGen.add(_Use[i] - maxUse * greater >= target[i] + 1 - maxUse);
-			hasAlternative = true;
+			differs += _Use[i];
 		}
 	}
-	if (hasAlternative)
-	{
-		_patGen.add(differs >= 1);
-	}
+	_patGen.add(differs >= 1);
 	differs.end();
 }
 
@@ -133,6 +124,14 @@ bool Subproblem::solve(bool reportFailure)
 	//_patSolver.exportModel("subproblem.lp");
 	//cout << "============ Subproblem to solve ============" << endl;
 	_patSolver.setOut(_env.getNullStream());
+	// Adding a no-good cut invalidates MIP starts retained from the previous
+	// pricing solve. Remove them before re-optimization to avoid retrying stale
+	// starts and emitting repeated CPLEX warnings.
+	int numMIPStarts = _patSolver.getNMIPStarts();
+	if (numMIPStarts > 0)
+	{
+		_patSolver.deleteMIPStarts(0, numMIPStarts);
+	}
 	if (!_patSolver.solve())
 	{
 		if (reportFailure)
@@ -147,8 +146,7 @@ bool Subproblem::solve(bool reportFailure)
 
 Pattern* Subproblem::getPattern()
 {
-	// Convert the integer pricing solution back into the Pattern abstraction.
-	// CPLEX returns IloNum values, so near-integers are rounded with tolerance.
+	// Convert the binary pricing solution back into the Pattern abstraction.
 	int nWdth = static_cast<int>(_products.size());
 	IloNumArray newPatt(_env, nWdth);
 	_patSolver.getValues(newPatt, _Use);
@@ -158,11 +156,7 @@ Pattern* Subproblem::getPattern()
 	{
 		if (newPatt[i] > Utility::RC_EPS)
 		{
-			int value = static_cast<int>(newPatt[i] + 0.5);
-			if (value > 0)
-			{
-				content.push_back(make_pair(i, value));
-			}
+			content.push_back(make_pair(i, 1));
 		}
 	}
 	newPatt.end();

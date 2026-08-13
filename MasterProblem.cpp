@@ -39,14 +39,19 @@ void MasterProblem::initialize()
 		exit(1);
 	}
 	
-	// Demand constraints:
-	//   sum_p a_ip * x_p >= demand_i
-	// where a_ip is the number of product i pieces in pattern p.
+	// Set-partitioning constraints:
+	//   sum_p a_ip * x_p = 1
+	// where a_ip is binary and indicates whether pattern p contains item i.
 	for (int i = 0; i < nWdth; i++)
 	{
 		PaperRoll* product = _products[i];
+		if (product == nullptr || product->getNumber() != 1)
+		{
+			cout << "Error, master problem requires unit-demand products" << endl;
+			exit(1);
+		}
 		string conName = "conProduct_" + to_string(product->getId());
-		_Fill.add(IloRange(_env, product->getNumber(), IloInfinity, conName.c_str()));
+		_Fill.add(IloRange(_env, 1, 1, conName.c_str()));
 	}
 
 	_cutOpt.add(_Fill);	// add constraints to model
@@ -65,25 +70,44 @@ void MasterProblem::addArtificialColumns(double cost)
 		col += _Fill[i](1);
 
 		string varName = "artificial_" + to_string(i);
-		_Artificial.add(IloNumVar(col, 0, IloInfinity, ILOFLOAT, varName.c_str()));
+		_Artificial.add(IloNumVar(col, 0, 1, ILOFLOAT, varName.c_str()));
 		col.end();
 	}
 }
 
 void MasterProblem::addColumn(Pattern* pattern)
 {
-	addColumn(pattern, 0, IloInfinity);
+	addColumn(pattern, 0, 1);
 }
 
 void MasterProblem::addColumn(Pattern* pattern, double lowerBound, double upperBound)
 {
-	// Build one CPLEX column. It contributes pattern cost to the objective and
-	// product counts to the demand rows.
+	// Build one CPLEX column. The LP relaxation keeps x_p continuous in [0, 1];
+	// solveIP() later converts the same variables to binary variables.
+	if (upperBound > 1)
+	{
+		upperBound = 1;
+	}
+	if (lowerBound < 0 || upperBound < lowerBound)
+	{
+		cout << "Error, invalid binary bounds for a master pattern variable" << endl;
+		exit(1);
+	}
+
 	IloNumColumn col(_env);
 	col += _RollsUsed(pattern->getCost());
+	vector<bool> included(_Fill.getSize(), false);
 	for (auto content : pattern->getContent())
 	{
-		col += _Fill[content.first](content.second);
+		if (content.first < 0 || content.first >= _Fill.getSize()
+			|| content.second != 1 || included[content.first])
+		{
+			cout << "Error, a master pattern must be a binary subset of the products" << endl;
+			col.end();
+			exit(1);
+		}
+		included[content.first] = true;
+		col += _Fill[content.first](1);
 	}
 
 	string varName = "x_" + to_string(pattern->getId());
@@ -118,7 +142,7 @@ bool MasterProblem::solve()
 
 vector<double> MasterProblem::getDuals()
 {
-	// Dual prices of demand constraints are passed to the pricing problem.
+	// Dual prices of exact-cover constraints are passed to the pricing problem.
 	// A new pattern is profitable when cost - dual contribution is negative.
 	vector<double> duals;
 	for (int i = 0; i < _Fill.getSize(); i++)
@@ -192,7 +216,7 @@ void MasterProblem::report()
 
 	cout << endl;
 
-	cout << "Demand constraint duals:" << endl;
+	cout << "Exact-cover constraint duals:" << endl;
 
 	for (int i = 0; i < _Fill.getSize(); i++)
 	{
@@ -211,7 +235,7 @@ bool MasterProblem::solveIP()
 	// is not full branch-and-price; it only solves over columns already present.
 	if (!_integerConverted)
 	{
-		_cutOpt.add(IloConversion(_env, _Cut, ILOINT));
+		_cutOpt.add(IloConversion(_env, _Cut, ILOBOOL));
 		_integerConverted = true;
 	}
 	if (!_cutSolver.solve())

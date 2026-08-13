@@ -8,8 +8,8 @@ class Pattern
 private:
 	int _id;
 
-	// Each entry is <product_index, count>. For example, <1, 3> means this
-	// pattern cuts three pieces of product 1 from one raw material roll.
+	// Each entry is <product_index, 1>. Products are distinct unit-demand items,
+	// so a binary pattern either contains an item once or does not contain it.
 	vector<pair<int, int>> _content;
 
 	// Cost of using this pattern once. In the standard one-stock cutting-stock

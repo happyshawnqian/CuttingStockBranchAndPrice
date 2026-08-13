@@ -20,7 +20,8 @@ public:
 
 		// Bounds apply to the master variable x_pattern, i.e. the number of
 		// times this cutting pattern may be used in the current branch node.
-		// upperBound == -1 means no finite upper bound.
+		// upperBound == -1 means no additional branch-specific upper bound.
+		// The binary master still applies its base upper bound of 1.
 		int lowerBound;
 		int upperBound;
 	};
@@ -121,8 +122,8 @@ private:
 	bool isKnownPattern(Pattern* pattern);
 	bool isKnownPatternSignature(const string& signature);
 
-	// Branch-node bounds are translated into variable lower/upper bounds when
-	// a node's restricted master problem is built.
+	// Branch-node bounds are translated into bounds within the base [0, 1]
+	// domain when a node's restricted master problem is built.
 	bool getPatternBounds(const BPNode& node, Pattern* pattern, double& lowerBound, double& upperBound);
 
 	// Branch-and-price search helpers.
