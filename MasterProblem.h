@@ -9,7 +9,8 @@
 //
 // Rows require each distinct item to be covered exactly once, and each column
 // represents one binary cutting pattern. During column generation the pattern
-// variables are continuous in [0, 1]. solveIP() converts them to binary.
+// variables are continuous and nonnegative. Their upper bound of one is implied
+// by the exact-cover rows. solveIP() converts them to binary variables.
 class MasterProblem : public Problem
 {
 private:
@@ -24,8 +25,8 @@ private:
 	// Set-partitioning rows. _Fill[i] requires item i to be covered exactly once.
 	IloRangeArray _Fill;
 
-	// Real pattern variables x_p. Each variable selects a distinct item subset
-	// and has domain [0, 1] in the LP relaxation.
+	// Real pattern variables x_p. Compatible columns are nonnegative without an
+	// explicit upper bound; branch-incompatible columns can be fixed at zero.
 	IloNumVarArray _Cut;
 
 	// Expensive fallback columns used in branch-and-price nodes. If any

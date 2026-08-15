@@ -77,20 +77,17 @@ void MasterProblem::addArtificialColumns(double cost)
 
 void MasterProblem::addColumn(Pattern* pattern)
 {
-	addColumn(pattern, 0, 1);
+	addColumn(pattern, 0, IloInfinity);
 }
 
 void MasterProblem::addColumn(Pattern* pattern, double lowerBound, double upperBound)
 {
-	// Build one CPLEX column. The LP relaxation keeps x_p continuous in [0, 1];
-	// solveIP() later converts the same variables to binary variables.
-	if (upperBound > 1)
-	{
-		upperBound = 1;
-	}
+	// Real pattern variables are nonnegative and normally have no explicit upper
+	// bound. Exact-cover rows implicitly keep every nonempty binary pattern at
+	// or below one. Explicit bounds are used to fix branch-incompatible columns.
 	if (lowerBound < 0 || upperBound < lowerBound)
 	{
-		cout << "Error, invalid binary bounds for a master pattern variable" << endl;
+		cout << "Error, invalid bounds for a master pattern variable" << endl;
 		exit(1);
 	}
 

@@ -469,10 +469,10 @@ string Controller::getItemDescription(int itemIndex) const
 
 bool Controller::solveColumnGenerationAtNode(const BPNode& node, vector<double>& values, double& objective)
 {
-	// Build a fresh restricted master for this branch node. Existing global
-	// columns are inserted with the node-specific bounds inherited from the
-	// branch path, then pricing adds new columns until no negative reduced-cost
-	// pattern remains.
+	// Build a fresh restricted master for this branch node. Compatible global
+	// columns have no explicit upper bound; incompatible columns are fixed at
+	// zero. Pricing then adds columns until no negative reduced-cost pattern
+	// remains.
 	MasterProblem master;
 	master.setMaterials(_problem->getMaterials());
 	master.setProducts(_problem->getProducts());
@@ -481,7 +481,8 @@ bool Controller::solveColumnGenerationAtNode(const BPNode& node, vector<double>&
 
 	for (auto pattern : _patterns)
 	{
-		double upperBound = isPatternCompatibleWithNode(node, pattern) ? 1 : 0;
+		double upperBound = isPatternCompatibleWithNode(node, pattern)
+			? IloInfinity : 0;
 		master.addColumn(pattern, 0, upperBound);
 	}
 
@@ -535,6 +536,10 @@ bool Controller::solveColumnGenerationAtNode(const BPNode& node, vector<double>&
 
 		if (isKnownPattern(newPattern))
 		{
+			// in theory, newPattern should not be identical to patterns generated before
+			// for safety, check and add to ensure runnability
+			cout << "Warnng, duplicated pattern is found in subproblem." << endl;
+
 			// Keep one object for each item subset in the global pattern pool.
 			// The no-good cut asks pricing for the next distinct feasible subset.
 			subproblem.addExcludedPattern(newPattern);
@@ -543,7 +548,7 @@ bool Controller::solveColumnGenerationAtNode(const BPNode& node, vector<double>&
 		}
 
 		_patterns.push_back(newPattern);
-		master.addColumn(newPattern, 0, 1);
+		master.addColumn(newPattern);
 		subproblem.addExcludedPattern(newPattern);
 	}
 
