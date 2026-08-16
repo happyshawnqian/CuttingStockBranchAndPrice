@@ -510,7 +510,7 @@ bool Controller::solveColumnGenerationAtNode(const BPNode& node, vector<double>&
 
 		vector<double> duals = master.getDuals();
 		subproblem.setObjective(duals);
-		if (!subproblem.solve(false))
+		if (!subproblem.solve(true)) // display error message and exit
 		{
 			break;
 		}
