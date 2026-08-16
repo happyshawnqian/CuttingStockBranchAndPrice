@@ -9,8 +9,9 @@
 //
 // Rows require each distinct item to be covered exactly once, and each column
 // represents one binary cutting pattern. During column generation the pattern
-// variables are continuous and nonnegative. Their upper bound of one is implied
-// by the exact-cover rows. solveIP() converts them to binary variables.
+// variables are continuous and nonnegative. For a nonempty pattern, the
+// exact-cover rows imply an upper bound of one. solveIP() converts the pattern
+// variables to binary variables.
 class MasterProblem : public Problem
 {
 private:
@@ -19,7 +20,9 @@ private:
 	IloEnv _env;
 	IloModel _cutOpt;
 
-	// Objective: minimize the total cost / number of raw rolls used.
+	// Minimize real pattern cost plus any artificial-column penalty. When
+	// artificial usage is zero and pattern costs are one, this equals the number
+	// of raw rolls used.
 	IloObjective _RollsUsed;
 
 	// Set-partitioning rows. _Fill[i] requires item i to be covered exactly once.

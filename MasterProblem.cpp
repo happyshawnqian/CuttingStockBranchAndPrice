@@ -32,7 +32,7 @@ MasterProblem::~MasterProblem()
 
 void MasterProblem::initialize()
 {
-	int nWdth = static_cast<int>(_products.size());	// number of products
+	int nWdth = static_cast<int>(_products.size());	// number of unit-demand items
 	if (_materials.empty() || _products.empty())
 	{
 		cout << "Error, master problem requires materials and products" << endl;

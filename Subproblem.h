@@ -8,8 +8,9 @@ using namespace std;
 // Pricing subproblem for column generation and branch-and-price.
 //
 // Given dual values from the master exact-cover constraints, this model solves
-// a binary knapsack problem and returns an item subset with negative reduced
-// cost. No-good constraints prevent regeneration of known subsets.
+// a binary knapsack problem and returns the minimum-reduced-cost item subset.
+// The caller adds that subset only when its reduced cost is negative. Optional
+// no-good constraints can exclude selected subsets from later pricing solves.
 class Subproblem : public Problem
 {
 private:
@@ -37,19 +38,24 @@ public:
 	Subproblem(const Subproblem&) = delete;
 	Subproblem& operator=(const Subproblem&) = delete;
 
-	void initialize();	// create variables and constraint, note that objective is not set
+	// Build binary item variables and the width constraint. The dual-dependent
+	// objective is supplied separately by setObjective().
+	void initialize();
 
 	// Optional no-good constraints used to forbid an already generated pattern.
 	// A forbidden pattern must differ in at least one item-selection bit.
 	void addExcludedPattern(Pattern* pattern);
 	void addExcludedPatterns(const vector<Pattern* >& patterns);
+
+	// Pricing-side Ryan-Foster restrictions. These constraints must mirror the
+	// compatibility rules used for existing columns in the node master.
 	void addTogetherConstraint(int firstItemIndex, int secondItemIndex);
 	void addSeparateConstraint(int firstItemIndex, int secondItemIndex);
 
-	void setObjective(const vector<double>& duals);	// get duals from master problem, and set objective
+	void setObjective(const vector<double>& duals); // Set reduced cost from master duals.
 	bool solve();
 	bool solve(bool reportFailure);
-	Pattern* getPattern();	// get the newly generated pattern
+	Pattern* getPattern(); // Convert the current pricing solution to a candidate pattern.
 	double getReducedCost();
 	void report();
 };

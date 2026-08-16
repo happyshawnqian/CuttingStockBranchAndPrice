@@ -5,8 +5,9 @@ class PaperRoll
 private:
 	int _id;
 
-	// Width is the physical roll width. For unit-demand products, _number is 1;
-	// for materials, it is the available capacity read from JSON.
+	// _width is the physical width of a material or product item. _number stores
+	// material capacity and is 1 for every expanded product item; JSON loading
+	// initializes both values from the corresponding input fields.
 	int _width;
 	int _number;
 	bool _isMaterial;	// true for raw material, false for demanded product
@@ -16,8 +17,8 @@ private:
 	int _sourceProductIndex;
 	int _copyIndex;
 
-	// Cost is used by the master/pricing objective. The current data loader
-	// keeps it at the default value 1 unless it is set manually.
+	// Raw-material cost is used by pricing and copied to generated patterns.
+	// Product cost is unused; the current data loader leaves both at 1.
 	double _cost;
 	static int _counter;
 

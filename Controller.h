@@ -11,16 +11,20 @@ using namespace std;
 class BPNode
 {
 public:
+	// A branch decision restricts every pattern available below the node.
+	// TOGETHER permits patterns containing both items or neither item, while
+	// SEPARATE forbids patterns containing both items at the same time.
 	enum class RyanFosterBranchType
 	{
-		Together,
-		Separate
+		TOGETHER,
+		SEPARATE
 	};
 
 	struct RyanFosterConstraint
 	{
 		// Product indices identify distinct unit-demand items. The first index is
-		// always smaller so the same pair has one canonical representation.
+		// always smaller so the same pair has one canonical representation. Each
+		// node stores every pair decision inherited along its root-to-node path.
 		int firstItemIndex;
 		int secondItemIndex;
 		RyanFosterBranchType branchType;
@@ -69,13 +73,15 @@ class Controller
 private:
 	struct RyanFosterPair
 	{
+		// togetherValue is y_ij = sum { x_p : pattern p contains i and j }.
+		// A value strictly between zero and one identifies a valid branch pair.
 		int firstItemIndex;
 		int secondItemIndex;
 		double togetherValue;
 	};
 
 	// The controller coordinates data loading, column generation, and the
-	// branch-and-price search. The Problem object owns the logical instance;
+	// branch-and-price search. The Problem object stores the logical instance;
 	// the two solver objects are rebuilt whenever the active model must be
 	// reset, because CPLEX model objects accumulate columns and constraints.
 	Problem* _problem;
@@ -90,7 +96,7 @@ private:
 	bool _ownsProducts;
 
 	// Incumbent information for branch-and-price. _bestSolution stores the
-	// values of the master pattern variables at the best integer leaf found.
+	// master pattern values from the best integer node found so far.
 	double _bestObjective;
 	vector<double> _bestSolution;
 	int _bestNodeId;

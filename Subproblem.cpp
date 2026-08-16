@@ -70,6 +70,7 @@ void Subproblem::addTogetherConstraint(int firstItemIndex, int secondItemIndex)
 	validateItemPair(firstItemIndex, secondItemIndex);
 
 	// Together branch: a feasible pattern contains both items or neither item.
+	// With binary selection variables, a_i - a_j = 0 enforces this equivalence.
 	IloExpr relation(_env);
 	relation += _Use[firstItemIndex] - _Use[secondItemIndex];
 	string constraintName = "rfTogether_" + to_string(firstItemIndex)
@@ -83,6 +84,7 @@ void Subproblem::addSeparateConstraint(int firstItemIndex, int secondItemIndex)
 	validateItemPair(firstItemIndex, secondItemIndex);
 
 	// Separate branch: no feasible pattern may contain both items.
+	// The inequality a_i + a_j <= 1 removes their simultaneous selection.
 	IloExpr relation(_env);
 	relation += _Use[firstItemIndex] + _Use[secondItemIndex];
 	string constraintName = "rfSeparate_" + to_string(firstItemIndex)
@@ -162,9 +164,9 @@ bool Subproblem::solve(bool reportFailure)
 	//_patSolver.exportModel("subproblem.lp");
 	//cout << "============ Subproblem to solve ============" << endl;
 	_patSolver.setOut(_env.getNullStream());
-	// Adding a no-good cut invalidates MIP starts retained from the previous
-	// pricing solve. Remove them before re-optimization to avoid retrying stale
-	// starts and emitting repeated CPLEX warnings.
+	// No-good constraints may be added between pricing solves, invalidating MIP
+	// starts retained by CPLEX. Clear retained starts before each re-optimization
+	// to avoid retrying stale solutions and emitting repeated warnings.
 	int numMIPStarts = _patSolver.getNMIPStarts();
 	if (numMIPStarts > 0)
 	{

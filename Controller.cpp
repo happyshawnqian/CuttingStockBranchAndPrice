@@ -34,6 +34,8 @@ void BPNode::addRyanFosterConstraint(int firstItemIndex, int secondItemIndex,
 	}
 	if (firstItemIndex > secondItemIndex)
 	{
+		// Canonical ordering makes duplicate and conflicting decisions detectable
+		// regardless of the order in which callers provide the item indices.
 		int temporaryIndex = firstItemIndex;
 		firstItemIndex = secondItemIndex;
 		secondItemIndex = temporaryIndex;
@@ -293,7 +295,7 @@ void Controller::clearPatterns()
 void Controller::validateProblemReady()
 {
 	// The algorithms assume one material width and at least one product. Failing
-	// early here avoids out-of-range access and division by zero in pricing.
+	// early here prevents invalid master rows and pricing capacity constraints.
 	if (_problem == nullptr)
 	{
 		cout << "Error, problem is not set" << endl;
@@ -415,17 +417,19 @@ bool Controller::patternContainsItem(Pattern* pattern, int itemIndex) const
 
 bool Controller::isPatternCompatibleWithNode(const BPNode& node, Pattern* pattern) const
 {
+	// Apply the branch path to an already generated column. TOGETHER rejects an
+	// exclusive-or selection; SEPARATE rejects simultaneous selection.
 	for (auto constraint : node.getRyanFosterConstraints())
 	{
 		bool containsFirst = patternContainsItem(pattern, constraint.firstItemIndex);
 		bool containsSecond = patternContainsItem(pattern, constraint.secondItemIndex);
 
-		if (constraint.branchType == BPNode::RyanFosterBranchType::Together
+		if (constraint.branchType == BPNode::RyanFosterBranchType::TOGETHER
 			&& containsFirst != containsSecond)
 		{
 			return false;
 		}
-		if (constraint.branchType == BPNode::RyanFosterBranchType::Separate
+		if (constraint.branchType == BPNode::RyanFosterBranchType::SEPARATE
 			&& containsFirst && containsSecond)
 		{
 			return false;
@@ -436,9 +440,11 @@ bool Controller::isPatternCompatibleWithNode(const BPNode& node, Pattern* patter
 
 void Controller::applyRyanFosterConstraints(const BPNode& node, Subproblem& subproblem) const
 {
+	// Pricing must describe the same pattern set as the node master. Otherwise a
+	// newly priced column could violate a branch decision enforced on old columns.
 	for (auto constraint : node.getRyanFosterConstraints())
 	{
-		if (constraint.branchType == BPNode::RyanFosterBranchType::Together)
+		if (constraint.branchType == BPNode::RyanFosterBranchType::TOGETHER)
 		{
 			subproblem.addTogetherConstraint(
 				constraint.firstItemIndex, constraint.secondItemIndex);
@@ -510,7 +516,7 @@ bool Controller::solveColumnGenerationAtNode(const BPNode& node, vector<double>&
 
 		vector<double> duals = master.getDuals();
 		subproblem.setObjective(duals);
-		if (!subproblem.solve(true)) // display error message and exit
+		if (!subproblem.solve(true)) // reportFailure=true terminates on failure
 		{
 			break;
 		}
@@ -536,12 +542,11 @@ bool Controller::solveColumnGenerationAtNode(const BPNode& node, vector<double>&
 
 		if (isKnownPattern(newPattern))
 		{
-			// in theory, newPattern should not be identical to patterns generated before
-			// for safety, check and add to ensure runnability
+			// An existing column with no upper bound should not have negative
+			// reduced cost after the master is re-optimized. Treat a duplicate as
+			// a defensive recovery case and ask pricing for a different subset.
 			cout << "Warnng, duplicated pattern is found in subproblem." << endl;
 
-			// Keep one object for each item subset in the global pattern pool.
-			// The no-good cut asks pricing for the next distinct feasible subset.
 			subproblem.addExcludedPattern(newPattern);
 			delete newPattern;
 			continue;
@@ -549,7 +554,9 @@ bool Controller::solveColumnGenerationAtNode(const BPNode& node, vector<double>&
 
 		_patterns.push_back(newPattern);
 		master.addColumn(newPattern);
-		//subproblem.addExcludedPattern(newPattern); // not need to add exclusion constraints
+		// Do not exclude the new pattern immediately. Once its master variable,
+		// which has no finite upper bound, is re-optimized, the same column should
+		// no longer price negative.
 	}
 
 	values = master.getValues();
@@ -597,6 +604,9 @@ bool Controller::findRyanFosterPair(const vector<double>& values, RyanFosterPair
 		return false;
 	}
 
+	// Aggregate y_ij over the current LP solution. Because each item is covered
+	// exactly once, y_ij lies in [0, 1] and measures how strongly i and j are
+	// assigned to the same selected patterns.
 	vector<vector<double>> togetherValues(
 		itemCount, vector<double>(itemCount, 0));
 	for (int patternIndex = 0; patternIndex < patternCount; patternIndex++)
@@ -635,6 +645,8 @@ bool Controller::findRyanFosterPair(const vector<double>& values, RyanFosterPair
 		}
 	}
 
+	// Values near zero or one already satisfy a Ryan-Foster disjunction. Among
+	// fractional pairs, choose the value closest to 0.5 to balance the children.
 	bool pairFound = false;
 	double bestDistance = 1.0e100;
 	for (int firstItemIndex = 0; firstItemIndex < itemCount; firstItemIndex++)
@@ -706,6 +718,9 @@ bool Controller::evaluateBPNode(BPNode& node)
 void Controller::createRyanFosterChildNodes(const BPNode& node, const RyanFosterPair& pair,
 	BPNode& togetherNode, BPNode& separateNode)
 {
+	// Both children inherit the complete branch path. Adding complementary
+	// decisions for the selected pair partitions the parent's feasible patterns:
+	// the together child allows both/neither, and the separate child forbids both.
 	togetherNode.setDepth(node.getDepth() + 1);
 	for (auto constraint : node.getRyanFosterConstraints())
 	{
@@ -713,7 +728,7 @@ void Controller::createRyanFosterChildNodes(const BPNode& node, const RyanFoster
 			constraint.secondItemIndex, constraint.branchType);
 	}
 	togetherNode.addRyanFosterConstraint(pair.firstItemIndex, pair.secondItemIndex,
-		BPNode::RyanFosterBranchType::Together);
+		BPNode::RyanFosterBranchType::TOGETHER);
 
 	separateNode.setDepth(node.getDepth() + 1);
 	for (auto constraint : node.getRyanFosterConstraints())
@@ -722,7 +737,7 @@ void Controller::createRyanFosterChildNodes(const BPNode& node, const RyanFoster
 			constraint.secondItemIndex, constraint.branchType);
 	}
 	separateNode.addRyanFosterConstraint(pair.firstItemIndex, pair.secondItemIndex,
-		BPNode::RyanFosterBranchType::Separate);
+		BPNode::RyanFosterBranchType::SEPARATE);
 }
 
 void Controller::reportRyanFosterBranch(const BPNode& node, const RyanFosterPair& pair,
@@ -748,8 +763,9 @@ bool Controller::isIntegerBoundClosed() const
 		return false;
 	}
 
-	// Every feasible integer objective is a whole number of rolls. Therefore,
-	// ceil(LP lower bound) is a valid lower bound for the integer problem.
+	// Under the current unit-cost model, every feasible integer objective is a
+	// whole number of rolls. Therefore, ceil(LP lower bound) is a valid integer
+	// lower bound.
 	double integerLowerBound = ceil(_lowerBound - Utility::BP_BOUND_EPS);
 	return integerLowerBound >= _bestObjective - Utility::BP_BOUND_EPS;
 }
@@ -815,6 +831,8 @@ void Controller::solveBranchAndPriceNode(const BPNode& node)
 		RyanFosterPair branchPair;
 		if (!findRyanFosterPair(current.getValues(), branchPair))
 		{
+			// For a fractional set-partitioning solution, Ryan-Foster theory
+			// guarantees at least one pair with a fractional together value.
 			cout << "Error, node id " << current.getId()
 				<< " has fractional pattern variables but no fractional "
 				<< "Ryan-Foster item pair" << endl;
