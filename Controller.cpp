@@ -549,7 +549,7 @@ bool Controller::solveColumnGenerationAtNode(const BPNode& node, vector<double>&
 
 		_patterns.push_back(newPattern);
 		master.addColumn(newPattern);
-		subproblem.addExcludedPattern(newPattern);
+		//subproblem.addExcludedPattern(newPattern); // not need to add exclusion constraints
 	}
 
 	values = master.getValues();
