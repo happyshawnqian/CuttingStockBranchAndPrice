@@ -497,13 +497,13 @@ bool Controller::solveColumnGenerationAtNode(const BPNode& node, vector<double>&
 	subproblem.setProducts(_problem->getProducts());
 	subproblem.initialize();
 	applyRyanFosterConstraints(node, subproblem);
-	for (auto pattern : _patterns)
-	{
-		if (isPatternCompatibleWithNode(node, pattern))
-		{
-			subproblem.addExcludedPattern(pattern);
-		}
-	}
+	//for (auto pattern : _patterns)
+	//{
+	//	if (isPatternCompatibleWithNode(node, pattern))
+	//	{
+	//		subproblem.addExcludedPattern(pattern);
+	//	}
+	//}
 
 	while (true)
 	{
