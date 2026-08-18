@@ -13,6 +13,10 @@ BPNode::BPNode()
 	_objective = 0;
 	_sequence = 0;
 	_depth = 0;
+	_poolColumnCount = 0;
+	_exactColumnCount = 0;
+	_exactSolveCount = 0;
+	_hasExactPricingCertificate = false;
 }
 
 BPNode::BPNode(int depth)
@@ -22,6 +26,10 @@ BPNode::BPNode(int depth)
 	_objective = 0;
 	_sequence = 0;
 	_depth = depth;
+	_poolColumnCount = 0;
+	_exactColumnCount = 0;
+	_exactSolveCount = 0;
+	_hasExactPricingCertificate = false;
 }
 
 void BPNode::addRyanFosterConstraint(int firstItemIndex, int secondItemIndex,
@@ -59,18 +67,56 @@ void BPNode::addRyanFosterConstraint(int firstItemIndex, int secondItemIndex,
 	constraint.secondItemIndex = secondItemIndex;
 	constraint.branchType = branchType;
 	_ryanFosterConstraints.push_back(constraint);
+	_values.clear();
+	_objective = 0;
+	_sequence = 0;
+	_poolColumnCount = 0;
+	_exactColumnCount = 0;
+	_exactSolveCount = 0;
+	_hasExactPricingCertificate = false;
 }
 
-void BPNode::setEvaluation(const vector<double>& values, double objective, int sequence)
+void BPNode::setActivePatternIndices(const vector<int>& activePatternIndices)
 {
+	_activePatternIndices = activePatternIndices;
+	_values.clear();
+	_objective = 0;
+	_sequence = 0;
+	_poolColumnCount = 0;
+	_exactColumnCount = 0;
+	_exactSolveCount = 0;
+	_hasExactPricingCertificate = false;
+}
+
+void BPNode::setExactEvaluation(const vector<int>& activePatternIndices,
+	const vector<double>& values, double objective, int sequence,
+	int poolColumnCount, int exactColumnCount, int exactSolveCount)
+{
+	if (activePatternIndices.size() != values.size())
+	{
+		cout << "Error, active pattern indices and master values have different sizes"
+			<< endl;
+		exit(1);
+	}
+
+	_activePatternIndices = activePatternIndices;
 	_values = values;
 	_objective = objective;
 	_sequence = sequence;
+	_poolColumnCount = poolColumnCount;
+	_exactColumnCount = exactColumnCount;
+	_exactSolveCount = exactSolveCount;
+	_hasExactPricingCertificate = true;
 }
 
 const vector<BPNode::RyanFosterConstraint>& BPNode::getRyanFosterConstraints() const
 {
 	return _ryanFosterConstraints;
+}
+
+const vector<int>& BPNode::getActivePatternIndices() const
+{
+	return _activePatternIndices;
 }
 
 const vector<double>& BPNode::getValues() const
@@ -98,16 +144,47 @@ int BPNode::getSequence() const
 	return _sequence;
 }
 
+int BPNode::getPoolColumnCount() const
+{
+	return _poolColumnCount;
+}
+
+int BPNode::getExactColumnCount() const
+{
+	return _exactColumnCount;
+}
+
+int BPNode::getExactSolveCount() const
+{
+	return _exactSolveCount;
+}
+
+bool BPNode::hasExactPricingCertificate() const
+{
+	return _hasExactPricingCertificate;
+}
+
 void BPNode::setDepth(int depth)
 {
 	_depth = depth;
 	_values.clear();
 	_objective = 0;
 	_sequence = 0;
+	_poolColumnCount = 0;
+	_exactColumnCount = 0;
+	_exactSolveCount = 0;
+	_hasExactPricingCertificate = false;
 }
 
 bool BPNodeCompare::operator()(const BPNode& left, const BPNode& right) const
 {
+	if (!left.hasExactPricingCertificate()
+		|| !right.hasExactPricingCertificate())
+	{
+		cout << "Error, best-first comparison requires exact-priced nodes" << endl;
+		exit(1);
+	}
+
 	// Use an exact ordering here so priority_queue::top() is the node with the
 	// true smallest LP objective. Numerical tolerances belong in bound tests,
 	// not in a comparator that must provide a strict weak ordering.
@@ -285,11 +362,7 @@ void Controller::clearProducts(bool clearProblemVector)
 
 void Controller::clearPatterns()
 {
-	for (auto pattern : _patterns)
-	{
-		delete pattern;
-	}
-	_patterns.clear();
+	_patternRepository.clear();
 }
 
 void Controller::validateProblemReady()
@@ -340,62 +413,6 @@ void Controller::validateProblemReady()
 			exit(1);
 		}
 	}
-}
-
-string Controller::getPatternSignature(Pattern* pattern)
-{
-	// Convert sparse Pattern content into a dense binary vector ordered by item
-	// index. Equal-width copies remain distinct because they have different
-	// positions in this vector.
-	int nWdth = 0;
-	if (_problem != nullptr)
-	{
-		nWdth = static_cast<int>(_problem->getProducts().size());
-	}
-
-	vector<int> counts(nWdth, 0);
-	if (pattern != nullptr)
-	{
-		for (auto content : pattern->getContent())
-		{
-			if (content.first >= 0 && content.first < nWdth)
-			{
-				counts[content.first] += content.second;
-			}
-		}
-	}
-
-	return getPatternSignature(counts);
-}
-
-string Controller::getPatternSignature(const vector<int>& counts)
-{
-	// A comma-separated vector is sufficient because entries are binary and the
-	// order of the unit-demand items is fixed by the expanded input data.
-	ostringstream signature;
-	for (int i = 0; i < static_cast<int>(counts.size()); i++)
-	{
-		if (i > 0) signature << ",";
-		signature << counts[i];
-	}
-	return signature.str();
-}
-
-bool Controller::isKnownPattern(Pattern* pattern)
-{
-	return isKnownPatternSignature(getPatternSignature(pattern));
-}
-
-bool Controller::isKnownPatternSignature(const string& signature)
-{
-	for (auto knownPattern : _patterns)
-	{
-		if (getPatternSignature(knownPattern) == signature)
-		{
-			return true;
-		}
-	}
-	return false;
 }
 
 bool Controller::patternContainsItem(Pattern* pattern, int itemIndex) const
@@ -473,23 +490,132 @@ string Controller::getItemDescription(int itemIndex) const
 	return description.str();
 }
 
-bool Controller::solveColumnGenerationAtNode(const BPNode& node, vector<double>& values, double& objective)
+double Controller::getPatternReducedCost(Pattern* pattern,
+	const vector<double>& duals) const
 {
-	// Build a fresh restricted master for this branch node. Compatible global
-	// columns have no explicit upper bound; incompatible columns are fixed at
-	// zero. Pricing then adds columns until no negative reduced-cost pattern
-	// remains.
+	if (pattern == nullptr
+		|| duals.size() != _problem->getProducts().size())
+	{
+		cout << "Error, cannot compute pool reduced cost with invalid data" << endl;
+		exit(1);
+	}
+
+	double reducedCost = pattern->getCost();
+	for (auto content : pattern->getContent())
+	{
+		if (content.first < 0 || content.first >= static_cast<int>(duals.size())
+			|| content.second != 1)
+		{
+			cout << "Error, invalid pattern content during pool pricing" << endl;
+			exit(1);
+		}
+		reducedCost -= duals[content.first];
+	}
+	return reducedCost;
+}
+
+void Controller::addActiveColumnToMaster(int repositoryIndex,
+	MasterProblem& master, vector<int>& localToGlobalPatternIndices,
+	unordered_set<int>& activePatternIndices) const
+{
+	if (activePatternIndices.find(repositoryIndex) != activePatternIndices.end())
+	{
+		cout << "Error, duplicate active global pattern index "
+			<< repositoryIndex << endl;
+		exit(1);
+	}
+
+	Pattern* pattern = _patternRepository.getPattern(repositoryIndex);
+	master.addColumn(pattern);
+	localToGlobalPatternIndices.push_back(repositoryIndex);
+	activePatternIndices.insert(repositoryIndex);
+}
+
+int Controller::addNegativePoolColumns(const BPNode& node,
+	const vector<double>& duals, MasterProblem& master,
+	vector<int>& localToGlobalPatternIndices,
+	unordered_set<int>& activePatternIndices) const
+{
+	int addedColumnCount = 0;
+	int repositorySize = _patternRepository.size();
+	for (int repositoryIndex = 0;
+		repositoryIndex < repositorySize; repositoryIndex++)
+	{
+		if (activePatternIndices.find(repositoryIndex) != activePatternIndices.end())
+		{
+			continue;
+		}
+
+		Pattern* pattern = _patternRepository.getPattern(repositoryIndex);
+		if (!isPatternCompatibleWithNode(node, pattern))
+		{
+			continue;
+		}
+
+		if (getPatternReducedCost(pattern, duals) < -Utility::RC_EPS)
+		{
+			addActiveColumnToMaster(repositoryIndex, master,
+				localToGlobalPatternIndices, activePatternIndices);
+			addedColumnCount++;
+		}
+	}
+	return addedColumnCount;
+}
+
+void Controller::validateActivePatternIndices(const BPNode& node,
+	const vector<int>& activePatternIndices) const
+{
+	unordered_set<int> uniqueIndices;
+	for (auto repositoryIndex : activePatternIndices)
+	{
+		if (uniqueIndices.find(repositoryIndex) != uniqueIndices.end())
+		{
+			cout << "Error, node id " << node.getId()
+				<< " contains duplicate active pattern index "
+				<< repositoryIndex << endl;
+			exit(1);
+		}
+
+		Pattern* pattern = _patternRepository.getPattern(repositoryIndex);
+		if (!isPatternCompatibleWithNode(node, pattern))
+		{
+			cout << "Error, node id " << node.getId()
+				<< " contains a Ryan-Foster-incompatible active pattern index "
+				<< repositoryIndex << endl;
+			exit(1);
+		}
+		uniqueIndices.insert(repositoryIndex);
+	}
+}
+
+void Controller::requireExactPricingCertificate(const BPNode& node) const
+{
+	if (!node.hasExactPricingCertificate())
+	{
+		cout << "Error, node id " << node.getId()
+			<< " has no exact-pricing lower-bound certificate" << endl;
+		exit(1);
+	}
+}
+
+bool Controller::solveColumnGenerationAtNode(BPNode& node)
+{
+	// The local master contains only this node's active repository patterns.
+	// Pool pricing activates known columns before exact pricing searches the
+	// complete Ryan-Foster-compatible pattern space.
 	MasterProblem master;
 	master.setMaterials(_problem->getMaterials());
 	master.setProducts(_problem->getProducts());
 	master.initialize();
 	master.addArtificialColumns(1000000);
 
-	for (auto pattern : _patterns)
+	validateActivePatternIndices(node, node.getActivePatternIndices());
+	vector<int> localToGlobalPatternIndices;
+	unordered_set<int> activePatternIndices;
+	for (auto repositoryIndex : node.getActivePatternIndices())
 	{
-		double upperBound = isPatternCompatibleWithNode(node, pattern)
-			? IloInfinity : 0;
-		master.addColumn(pattern, 0, upperBound);
+		addActiveColumnToMaster(repositoryIndex, master,
+			localToGlobalPatternIndices, activePatternIndices);
 	}
 
 	Subproblem subproblem;
@@ -497,30 +623,36 @@ bool Controller::solveColumnGenerationAtNode(const BPNode& node, vector<double>&
 	subproblem.setProducts(_problem->getProducts());
 	subproblem.initialize();
 	applyRyanFosterConstraints(node, subproblem);
-	//for (auto pattern : _patterns)
-	//{
-	//	if (isPatternCompatibleWithNode(node, pattern))
-	//	{
-	//		subproblem.addExcludedPattern(pattern);
-	//	}
-	//}
+
+	int poolColumnCount = 0;
+	int exactColumnCount = 0;
+	int exactSolveCount = 0;
 
 	while (true)
 	{
-		// Solve the current LP relaxation, then let the pricing subproblem find
-		// a pattern with the most negative reduced cost.
 		if (!master.solve())
 		{
 			return false;
 		}
 
 		vector<double> duals = master.getDuals();
-		subproblem.setObjective(duals);
-		if (!subproblem.solve(true)) // reportFailure=true terminates on failure
+		int poolColumnsAdded = addNegativePoolColumns(node, duals, master,
+			localToGlobalPatternIndices, activePatternIndices);
+		if (poolColumnsAdded > 0)
 		{
-			break;
+			poolColumnCount += poolColumnsAdded;
+			continue;
 		}
-		if (subproblem.getReducedCost() > -Utility::RC_EPS)
+
+		subproblem.setObjective(duals);
+		exactSolveCount++;
+		if (!subproblem.solve(true))
+		{
+			return false;
+		}
+
+		double exactReducedCost = subproblem.getReducedCost();
+		if (exactReducedCost >= -Utility::RC_EPS)
 		{
 			break;
 		}
@@ -531,54 +663,58 @@ bool Controller::solveColumnGenerationAtNode(const BPNode& node, vector<double>&
 			cout << "Error, pricing generated a pattern that violates the current "
 				<< "Ryan-Foster constraints" << endl;
 			delete newPattern;
-			return false;
+			exit(1);
 		}
 
 #ifdef DEBUG
 		cout << "************* new pattern *************" << endl;
 		newPattern->print();
-		cout << "reduced cost = " << subproblem.getReducedCost() << endl;
+		cout << "reduced cost = " << exactReducedCost << endl;
 #endif
 
-		if (isKnownPattern(newPattern))
+		PatternRepository::AddResult addResult =
+			_patternRepository.addOrGet(newPattern);
+		if (activePatternIndices.find(addResult.patternIndex)
+			!= activePatternIndices.end())
 		{
-			// An existing column with no upper bound should not have negative
-			// reduced cost after the master is re-optimized. Treat a duplicate as
-			// a defensive recovery case and ask pricing for a different subset.
-			cout << "Warnng, duplicated pattern is found in subproblem." << endl;
-
-			subproblem.addExcludedPattern(newPattern);
-			delete newPattern;
-			continue;
+			Pattern* activePattern =
+				_patternRepository.getPattern(addResult.patternIndex);
+			cout << "Error, exact pricing returned active global pattern index "
+				<< addResult.patternIndex << " (Pattern id "
+				<< activePattern->getId() << ") with reduced cost "
+				<< exactReducedCost << ", pool reduced cost "
+				<< getPatternReducedCost(activePattern, duals) << endl;
+			exit(1);
 		}
 
-		_patterns.push_back(newPattern);
-		master.addColumn(newPattern);
-		// Do not exclude the new pattern immediately. Once its master variable,
-		// which has no finite upper bound, is re-optimized, the same column should
-		// no longer price negative.
+		addActiveColumnToMaster(addResult.patternIndex, master,
+			localToGlobalPatternIndices, activePatternIndices);
+		if (addResult.inserted)
+		{
+			exactColumnCount++;
+		}
 	}
 
-	values = master.getValues();
-	objective = master.getObjectiveValue();
-	for (int patternIndex = 0;
-		patternIndex < static_cast<int>(values.size()); patternIndex++)
+	vector<double> values = master.getValues();
+	if (values.size() != localToGlobalPatternIndices.size())
 	{
-		if (values[patternIndex] > Utility::RC_EPS
-			&& !isPatternCompatibleWithNode(node, _patterns[patternIndex]))
-		{
-			cout << "Error, a positive master pattern violates the current "
-				<< "Ryan-Foster constraints" << endl;
-			return false;
-		}
+		cout << "Error, local master values do not match the local-to-global "
+			<< "pattern mapping" << endl;
+		exit(1);
 	}
+
+	validateActivePatternIndices(node, localToGlobalPatternIndices);
 	if (master.getArtificialUsage() > Utility::RC_EPS)
 	{
-		// Artificial usage means real generated columns cannot satisfy this
-		// branch node's exact-cover rows and bounds, so the node is infeasible.
+		// Exact pricing has exhausted the full compatible pattern space, so
+		// positive artificial usage certifies that the real node is infeasible.
 		return false;
 	}
 
+	node.setExactEvaluation(localToGlobalPatternIndices, values,
+		master.getObjectiveValue(), _nextBranchAndPriceSequence,
+		poolColumnCount, exactColumnCount, exactSolveCount);
+	_nextBranchAndPriceSequence++;
 	return true;
 }
 
@@ -595,13 +731,18 @@ bool Controller::isIntegerPatternSolution(const vector<double>& values) const
 	return true;
 }
 
-bool Controller::findRyanFosterPair(const vector<double>& values, RyanFosterPair& pair) const
+bool Controller::findRyanFosterPair(const BPNode& node, RyanFosterPair& pair) const
 {
+	requireExactPricingCertificate(node);
+	const vector<double>& values = node.getValues();
+	const vector<int>& activePatternIndices = node.getActivePatternIndices();
 	int itemCount = static_cast<int>(_problem->getProducts().size());
 	int patternCount = static_cast<int>(values.size());
-	if (patternCount > static_cast<int>(_patterns.size()))
+	if (patternCount != static_cast<int>(activePatternIndices.size()))
 	{
-		return false;
+		cout << "Error, Ryan-Foster branching received an invalid node column mapping"
+			<< endl;
+		exit(1);
 	}
 
 	// Aggregate y_ij over the current LP solution. Because each item is covered
@@ -618,7 +759,9 @@ bool Controller::findRyanFosterPair(const vector<double>& values, RyanFosterPair
 		}
 
 		vector<int> patternItems;
-		for (auto content : _patterns[patternIndex]->getContent())
+		int repositoryIndex = activePatternIndices[patternIndex];
+		Pattern* pattern = _patternRepository.getPattern(repositoryIndex);
+		for (auto content : pattern->getContent())
 		{
 			if (content.second == 1 && content.first >= 0 && content.first < itemCount)
 			{
@@ -684,15 +827,21 @@ bool Controller::evaluateBPNode(BPNode& node)
 
 	_processedBranchAndPriceNodes++;
 
-	vector<double> values;
-	double objective = 0;
-	if (!solveColumnGenerationAtNode(node, values, objective))
+	if (!solveColumnGenerationAtNode(node))
 	{
 		return false;
 	}
+	requireExactPricingCertificate(node);
+	const vector<double>& values = node.getValues();
+	double objective = node.getObjective();
 
 	cout << "Node id " << node.getId() << ", depth " << node.getDepth() << ", processed " << _processedBranchAndPriceNodes
-		<< ", LP objective = " << objective << endl;
+		<< ", LP objective = " << objective
+		<< ", active columns = " << node.getActivePatternIndices().size()
+		<< ", pool activations = " << node.getPoolColumnCount()
+		<< ", exact generated = " << node.getExactColumnCount()
+		<< ", exact solves = " << node.getExactSolveCount()
+		<< ", exact pricing = complete" << endl;
 
 	if (objective >= _bestObjective - Utility::RC_EPS)
 	{
@@ -702,7 +851,20 @@ bool Controller::evaluateBPNode(BPNode& node)
 	if (isIntegerPatternSolution(values))
 	{
 		_bestObjective = objective;
-		_bestSolution = values;
+		_bestSolution.clear();
+		const vector<int>& activePatternIndices = node.getActivePatternIndices();
+		for (int localIndex = 0;
+			localIndex < static_cast<int>(values.size()); localIndex++)
+		{
+			int quantity = static_cast<int>(floor(values[localIndex] + 0.5));
+			if (quantity > 0)
+			{
+				PatternUsage usage;
+				usage.repositoryIndex = activePatternIndices[localIndex];
+				usage.quantity = quantity;
+				_bestSolution.push_back(usage);
+			}
+		}
 		_bestNodeId = node.getId();
 		_bestNodeDepth = node.getDepth();
 		cout << "New incumbent uses " << _bestObjective << " rolls at node id "
@@ -710,17 +872,17 @@ bool Controller::evaluateBPNode(BPNode& node)
 		return false;
 	}
 
-	node.setEvaluation(values, objective, _nextBranchAndPriceSequence);
-	_nextBranchAndPriceSequence++;
 	return true;
 }
 
 void Controller::createRyanFosterChildNodes(const BPNode& node, const RyanFosterPair& pair,
 	BPNode& togetherNode, BPNode& separateNode)
 {
+	requireExactPricingCertificate(node);
 	// Both children inherit the complete branch path. Adding complementary
 	// decisions for the selected pair partitions the parent's feasible patterns:
 	// the together child allows both/neither, and the separate child forbids both.
+	// Each child also inherits every parent active column that remains compatible.
 	togetherNode.setDepth(node.getDepth() + 1);
 	for (auto constraint : node.getRyanFosterConstraints())
 	{
@@ -738,6 +900,23 @@ void Controller::createRyanFosterChildNodes(const BPNode& node, const RyanFoster
 	}
 	separateNode.addRyanFosterConstraint(pair.firstItemIndex, pair.secondItemIndex,
 		BPNode::RyanFosterBranchType::SEPARATE);
+
+	vector<int> togetherActivePatternIndices;
+	vector<int> separateActivePatternIndices;
+	for (auto repositoryIndex : node.getActivePatternIndices())
+	{
+		Pattern* pattern = _patternRepository.getPattern(repositoryIndex);
+		if (isPatternCompatibleWithNode(togetherNode, pattern))
+		{
+			togetherActivePatternIndices.push_back(repositoryIndex);
+		}
+		if (isPatternCompatibleWithNode(separateNode, pattern))
+		{
+			separateActivePatternIndices.push_back(repositoryIndex);
+		}
+	}
+	togetherNode.setActivePatternIndices(togetherActivePatternIndices);
+	separateNode.setActivePatternIndices(separateActivePatternIndices);
 }
 
 void Controller::reportRyanFosterBranch(const BPNode& node, const RyanFosterPair& pair,
@@ -795,6 +974,7 @@ void Controller::solveBranchAndPriceNode(const BPNode& node)
 	BPNode rootNode = node;
 	if (evaluateBPNode(rootNode))
 	{
+		requireExactPricingCertificate(rootNode);
 		openNodes.push(rootNode);
 	}
 
@@ -802,6 +982,7 @@ void Controller::solveBranchAndPriceNode(const BPNode& node)
 	{
 		// All nodes in the queue have completed pricing, so the smallest queued
 		// LP objective is the global lower bound for every unexplored subtree.
+		requireExactPricingCertificate(openNodes.top());
 		_lowerBound = openNodes.top().getObjective();
 		reportBranchAndPriceBounds();
 
@@ -822,6 +1003,7 @@ void Controller::solveBranchAndPriceNode(const BPNode& node)
 
 		BPNode current = openNodes.top();
 		openNodes.pop();
+		requireExactPricingCertificate(current);
 
 		if (current.getObjective() >= _bestObjective - Utility::RC_EPS)
 		{
@@ -829,7 +1011,7 @@ void Controller::solveBranchAndPriceNode(const BPNode& node)
 		}
 
 		RyanFosterPair branchPair;
-		if (!findRyanFosterPair(current.getValues(), branchPair))
+		if (!findRyanFosterPair(current, branchPair))
 		{
 			// For a fractional set-partitioning solution, Ryan-Foster theory
 			// guarantees at least one pair with a fractional together value.
@@ -848,22 +1030,13 @@ void Controller::solveBranchAndPriceNode(const BPNode& node)
 
 		if (evaluateBPNode(togetherNode))
 		{
+			requireExactPricingCertificate(togetherNode);
 			openNodes.push(togetherNode);
-		}
-
-		// The separate branch has not been solved yet, so the parent LP objective
-		// remains a valid lower bound for that subtree. If the together branch has
-		// produced a closing incumbent, avoid evaluating the sibling.
-		_lowerBound = current.getObjective();
-		if (hasBranchAndPriceIncumbent() && isIntegerBoundClosed())
-		{
-			reportBranchAndPriceBounds();
-			_terminatedByIntegerBound = true;
-			break;
 		}
 
 		if (evaluateBPNode(separateNode))
 		{
+			requireExactPricingCertificate(separateNode);
 			openNodes.push(separateNode);
 		}
 	}
@@ -880,8 +1053,8 @@ void Controller::solveBranchAndPriceNode(const BPNode& node)
 
 void Controller::reportBranchAndPriceSolution()
 {
-	// Report only positive pattern variables from the incumbent. Pattern IDs
-	// are stable enough for output but signatures should be used for logic.
+	// Incumbent entries retain repository indices, so later repository growth
+	// cannot change which Pattern each positive integer quantity references.
 	cout << endl;
 	if (_bestSolution.empty())
 	{
@@ -892,14 +1065,14 @@ void Controller::reportBranchAndPriceSolution()
 		cout << "Best branch-and-price solution uses " << _bestObjective
 			<< " rolls, found at node id " << _bestNodeId
 			<< " on level " << _bestNodeDepth << endl;
-		for (int i = 0; i < static_cast<int>(_bestSolution.size()) && i < static_cast<int>(_patterns.size()); i++)
+		for (auto usage : _bestSolution)
 		{
-			int value = static_cast<int>(floor(_bestSolution[i] + 0.5));
-			if (value > 0)
-			{
-				cout << "  Pattern " << _patterns[i]->getId() << " = " << value << endl;
-				_patterns[i]->print();
-			}
+			Pattern* pattern =
+				_patternRepository.getPattern(usage.repositoryIndex);
+			cout << "  Global pattern index " << usage.repositoryIndex
+				<< ", Pattern " << pattern->getId()
+				<< " = " << usage.quantity << endl;
+			pattern->print();
 		}
 	}
 	cout << "Global LP lower bound = " << _lowerBound << endl;
@@ -910,7 +1083,8 @@ void Controller::reportBranchAndPriceSolution()
 		cout << "Global upper bound = " << _bestObjective << endl;
 	}
 	cout << "Processed " << _processedBranchAndPriceNodes << " branch-and-price nodes" << endl;
-	cout << "Generated " << _patterns.size() << " patterns" << endl;
+	cout << "Global repository contains " << _patternRepository.size()
+		<< " unique patterns" << endl;
 	if (_terminatedByIntegerBound)
 	{
 		cout << "Branching stopped because the integer lower bound reached the incumbent" << endl;
@@ -1025,7 +1199,8 @@ void Controller::solveCG()
 	// CPLEX Subproblem pricing model. This path is kept for comparison with
 	// the branch-and-price implementation.
 	validateProblemReady();
-	clearPatterns();
+	_patternRepository.reset(
+		static_cast<int>(_problem->getProducts().size()));
 	resetSolvers();
 	syncProblemToSolvers();
 
@@ -1033,9 +1208,20 @@ void Controller::solveCG()
 	_subproblem->initialize();
 
 	vector<Pattern* > initialPatterns = findInitialPatterns();
-	_patterns.insert(_patterns.end(), initialPatterns.begin(), initialPatterns.end());
-	_masterProblem->addColumns(initialPatterns);
-	_subproblem->addExcludedPatterns(initialPatterns);
+	for (auto initialPattern : initialPatterns)
+	{
+		PatternRepository::AddResult addResult =
+			_patternRepository.addOrGet(initialPattern);
+		if (!addResult.inserted)
+		{
+			cout << "Error, duplicate singleton pattern during initialization" << endl;
+			exit(1);
+		}
+		Pattern* repositoryPattern =
+			_patternRepository.getPattern(addResult.patternIndex);
+		_masterProblem->addColumn(repositoryPattern);
+		_subproblem->addExcludedPattern(repositoryPattern);
+	}
 
 	int iter = 0;
 
@@ -1061,16 +1247,18 @@ void Controller::solveCG()
 		if (_subproblem->getReducedCost() > -Utility::RC_EPS) break;
 
 		Pattern* newPattern = _subproblem->getPattern();
-		if (isKnownPattern(newPattern))
+		PatternRepository::AddResult addResult =
+			_patternRepository.addOrGet(newPattern);
+		Pattern* repositoryPattern =
+			_patternRepository.getPattern(addResult.patternIndex);
+		if (!addResult.inserted)
 		{
 			// This is a defensive check in addition to the binary no-good cuts.
-			_subproblem->addExcludedPattern(newPattern);
-			delete newPattern;
+			_subproblem->addExcludedPattern(repositoryPattern);
 			continue;
 		}
-		_patterns.push_back(newPattern);
-		_masterProblem->addColumn(newPattern);
-		_subproblem->addExcludedPattern(newPattern);
+		_masterProblem->addColumn(repositoryPattern);
+		_subproblem->addExcludedPattern(repositoryPattern);
 
 		iter++;
 	}
@@ -1104,7 +1292,7 @@ vector<Pattern* > Controller::findInitialPatterns()
 
 void Controller::solveIP()
 {
-	if (_patterns.empty())
+	if (_patternRepository.size() == 0)
 	{
 		cout << "Error, solveCG must generate columns before solveIP" << endl;
 		exit(1);
@@ -1118,10 +1306,11 @@ void Controller::solveIP()
 
 void Controller::solveBP()
 {
-	// Branch-and-price entry point. The root column pool starts with simple
-	// single-product patterns; each node can add more patterns through pricing.
+	// Branch-and-price entry point. The repository and root active set start with
+	// singleton patterns; node pricing activates known columns or adds new ones.
 	validateProblemReady();
-	clearPatterns();
+	_patternRepository.reset(
+		static_cast<int>(_problem->getProducts().size()));
 	resetSolvers();
 	syncProblemToSolvers();
 
@@ -1137,19 +1326,21 @@ void Controller::solveBP()
 	_nextBranchAndPriceSequence = 0;
 
 	vector<Pattern* > initialPatterns = findInitialPatterns();
+	vector<int> rootActivePatternIndices;
 	for (auto pattern : initialPatterns)
 	{
-		if (isKnownPattern(pattern))
+		PatternRepository::AddResult addResult =
+			_patternRepository.addOrGet(pattern);
+		if (!addResult.inserted)
 		{
-			delete pattern;
+			cout << "Error, duplicate singleton pattern during initialization" << endl;
+			exit(1);
 		}
-		else
-		{
-			_patterns.push_back(pattern);
-		}
+		rootActivePatternIndices.push_back(addResult.patternIndex);
 	}
 
 	BPNode root(0);
+	root.setActivePatternIndices(rootActivePatternIndices);
 	solveBranchAndPriceNode(root);
 	reportBranchAndPriceSolution();
 }

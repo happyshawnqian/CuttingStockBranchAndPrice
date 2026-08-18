@@ -28,8 +28,8 @@ private:
 	// Set-partitioning rows. _Fill[i] requires item i to be covered exactly once.
 	IloRangeArray _Fill;
 
-	// Real pattern variables x_p. Compatible columns are nonnegative without an
-	// explicit upper bound; branch-incompatible columns can be fixed at zero.
+	// Real pattern variables x_p. Branch-and-price normally instantiates only
+	// node-active compatible columns; explicit bounds remain available to callers.
 	IloNumVarArray _Cut;
 
 	// Expensive fallback columns used in branch-and-price nodes. If any

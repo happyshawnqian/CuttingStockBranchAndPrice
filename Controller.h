@@ -4,8 +4,10 @@
 #include <fstream>
 #include <string>
 #include "MasterProblem.h"
+#include "PatternRepository.h"
 #include "Subproblem.h"
 #include "Utility.h"
+#include <unordered_set>
 using namespace std;
 
 class BPNode
@@ -35,14 +37,22 @@ public:
 
 	void addRyanFosterConstraint(int firstItemIndex, int secondItemIndex,
 		RyanFosterBranchType branchType);
-	void setEvaluation(const vector<double>& values, double objective, int sequence);
+	void setActivePatternIndices(const vector<int>& activePatternIndices);
+	void setExactEvaluation(const vector<int>& activePatternIndices,
+		const vector<double>& values, double objective, int sequence,
+		int poolColumnCount, int exactColumnCount, int exactSolveCount);
 
 	const vector<RyanFosterConstraint>& getRyanFosterConstraints() const;
+	const vector<int>& getActivePatternIndices() const;
 	const vector<double>& getValues() const;
 	int getId() const;
 	double getObjective() const;
 	int getDepth() const;
 	int getSequence() const;
+	int getPoolColumnCount() const;
+	int getExactColumnCount() const;
+	int getExactSolveCount() const;
+	bool hasExactPricingCertificate() const;
 	void setDepth(int depth);
 
 private:
@@ -54,12 +64,17 @@ private:
 	// Each child inherits all parent pair decisions and adds one new decision.
 	vector<RyanFosterConstraint> _ryanFosterConstraints;
 
-	// LP information for best-first search. These fields are filled after the
-	// node's restricted master is solved by column generation.
+	// Global repository indices define the node-specific RMP columns. _values
+	// uses the same local order after the node has completed exact pricing.
+	vector<int> _activePatternIndices;
 	vector<double> _values;
 	double _objective;
 	int _sequence;
 	int _depth;
+	int _poolColumnCount;
+	int _exactColumnCount;
+	int _exactSolveCount;
+	bool _hasExactPricingCertificate;
 };
 
 class BPNodeCompare
@@ -80,6 +95,12 @@ private:
 		double togetherValue;
 	};
 
+	struct PatternUsage
+	{
+		int repositoryIndex;
+		int quantity;
+	};
+
 	// The controller coordinates data loading, column generation, and the
 	// branch-and-price search. The Problem object stores the logical instance;
 	// the two solver objects are rebuilt whenever the active model must be
@@ -95,10 +116,10 @@ private:
 	bool _ownsMaterials;
 	bool _ownsProducts;
 
-	// Incumbent information for branch-and-price. _bestSolution stores the
-	// master pattern values from the best integer node found so far.
+	// Incumbent entries use stable repository indices and therefore remain valid
+	// when later nodes append more patterns to the global repository.
 	double _bestObjective;
-	vector<double> _bestSolution;
+	vector<PatternUsage> _bestSolution;
 	int _bestNodeId;
 	int _bestNodeDepth;
 	double _lowerBound;
@@ -110,9 +131,8 @@ private:
 	int _maxBranchAndPriceNodes;
 	int _nextBranchAndPriceSequence;
 
-	// Global column pool. Every Pattern represents one cutting pattern, and
-	// branch-and-price nodes build restricted master problems from this pool.
-	vector<Pattern* > _patterns;
+	// Global, append-only repository shared by all branch-and-price nodes.
+	PatternRepository _patternRepository;
 
 	// Clear helpers release only the objects that this controller owns.
 	void clearMaterials(bool clearProblemVector);
@@ -125,23 +145,29 @@ private:
 	void syncProblemToSolvers();
 	void validateProblemReady();
 
-	// Pattern signatures are used for duplicate detection in the global pool.
-	string getPatternSignature(Pattern* pattern);
-	string getPatternSignature(const vector<int>& counts);
-	bool isKnownPattern(Pattern* pattern);
-	bool isKnownPatternSignature(const string& signature);
-
 	// Ryan-Foster decisions restrict the columns available at each node.
 	bool patternContainsItem(Pattern* pattern, int itemIndex) const;
 	bool isPatternCompatibleWithNode(const BPNode& node, Pattern* pattern) const;
 	void applyRyanFosterConstraints(const BPNode& node, Subproblem& subproblem) const;
 	string getItemDescription(int itemIndex) const;
 
+	// Node column management and pricing helpers.
+	double getPatternReducedCost(Pattern* pattern, const vector<double>& duals) const;
+	void addActiveColumnToMaster(int repositoryIndex, MasterProblem& master,
+		vector<int>& localToGlobalPatternIndices,
+		unordered_set<int>& activePatternIndices) const;
+	int addNegativePoolColumns(const BPNode& node, const vector<double>& duals,
+		MasterProblem& master, vector<int>& localToGlobalPatternIndices,
+		unordered_set<int>& activePatternIndices) const;
+	void validateActivePatternIndices(const BPNode& node,
+		const vector<int>& activePatternIndices) const;
+	void requireExactPricingCertificate(const BPNode& node) const;
+
 	// Branch-and-price search helpers.
-	bool solveColumnGenerationAtNode(const BPNode& node, vector<double>& values, double& objective);
+	bool solveColumnGenerationAtNode(BPNode& node);
 	bool evaluateBPNode(BPNode& node);
 	bool isIntegerPatternSolution(const vector<double>& values) const;
-	bool findRyanFosterPair(const vector<double>& values, RyanFosterPair& pair) const;
+	bool findRyanFosterPair(const BPNode& node, RyanFosterPair& pair) const;
 	void createRyanFosterChildNodes(const BPNode& node, const RyanFosterPair& pair,
 		BPNode& togetherNode, BPNode& separateNode);
 	void reportRyanFosterBranch(const BPNode& node, const RyanFosterPair& pair,

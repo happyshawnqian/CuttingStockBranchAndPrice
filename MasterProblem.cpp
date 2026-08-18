@@ -84,7 +84,7 @@ void MasterProblem::addColumn(Pattern* pattern, double lowerBound, double upperB
 {
 	// Real pattern variables are nonnegative and normally have no explicit upper
 	// bound. Exact-cover rows implicitly keep every nonempty binary pattern at
-	// or below one. Explicit bounds are used to fix branch-incompatible columns.
+	// or below one. Explicit bounds remain available for specialized callers.
 	if (lowerBound < 0 || upperBound < lowerBound)
 	{
 		cout << "Error, invalid bounds for a master pattern variable" << endl;
