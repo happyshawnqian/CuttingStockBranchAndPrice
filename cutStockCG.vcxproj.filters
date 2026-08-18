@@ -30,6 +30,9 @@
     <ClCompile Include="Pattern.cpp">
       <Filter>Domain</Filter>
     </ClCompile>
+    <ClCompile Include="PatternRepository.cpp">
+      <Filter>Controller</Filter>
+    </ClCompile>
     <ClCompile Include="Controller.cpp">
       <Filter>Controller</Filter>
     </ClCompile>
@@ -49,6 +52,9 @@
     </ClInclude>
     <ClInclude Include="Pattern.h">
       <Filter>Domain</Filter>
+    </ClInclude>
+    <ClInclude Include="PatternRepository.h">
+      <Filter>Controller</Filter>
     </ClInclude>
     <ClInclude Include="Controller.h">
       <Filter>Controller</Filter>
