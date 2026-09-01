@@ -127,7 +127,8 @@ bool MasterProblem::solve()
 	if (!_cutSolver.solve())
 	{
 		cout << "Error, master problem could not be solved" << endl;
-		return false;
+		//return false;
+		exit(1);
 	}
 
 #ifdef DEBUG
@@ -238,7 +239,8 @@ bool MasterProblem::solveIP()
 	if (!_cutSolver.solve())
 	{
 		cout << "Error, integer master problem could not be solved" << endl;
-		return false;
+		//return false;
+		exit(1);
 	}
 	return true;
 }
