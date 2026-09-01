@@ -35,7 +35,7 @@ public:
 private:
 	int _itemCount;
 	vector<Pattern* > _patterns;
-	unordered_map<string, int> _indexBySignature;
+	unordered_map<string, int> _signatureToRepositoryIndex;
 
 	string getSignature(Pattern* pattern) const;
 };

@@ -34,7 +34,7 @@ void PatternRepository::clear()
 		delete pattern;
 	}
 	_patterns.clear();
-	_indexBySignature.clear();
+	_signatureToRepositoryIndex.clear();
 	_itemCount = 0;
 }
 
@@ -47,8 +47,8 @@ PatternRepository::AddResult PatternRepository::addOrGet(Pattern* candidate)
 	}
 
 	string signature = getSignature(candidate);
-	auto known = _indexBySignature.find(signature);
-	if (known != _indexBySignature.end())
+	auto known = _signatureToRepositoryIndex.find(signature);
+	if (known != _signatureToRepositoryIndex.end())
 	{
 		int knownIndex = known->second;
 		Pattern* knownPattern = _patterns[knownIndex];
@@ -66,7 +66,7 @@ PatternRepository::AddResult PatternRepository::addOrGet(Pattern* candidate)
 
 	int patternIndex = static_cast<int>(_patterns.size());
 	_patterns.push_back(candidate);
-	_indexBySignature[signature] = patternIndex;
+	_signatureToRepositoryIndex[signature] = patternIndex;
 
 	AddResult result = { patternIndex, true };
 	return result;
