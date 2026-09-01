@@ -630,10 +630,7 @@ bool Controller::solveColumnGenerationAtNode(BPNode& node)
 
 	while (true)
 	{
-		if (!master.solve())
-		{
-			return false;
-		}
+		master.solve();
 
 		vector<double> duals = master.getDuals();
 		int poolColumnsAdded = addNegativePoolColumns(node, duals, master,
@@ -1230,10 +1227,7 @@ void Controller::solveCG()
 		cout << "--------------------------------------------- " << endl;
 		cout << "Iteration " << iter << endl;
 
-		if (!_masterProblem->solve())
-		{
-			exit(1);
-		}
+		_masterProblem->solve();
 		_masterProblem->report();
 		vector<double> duals = _masterProblem->getDuals();
 
@@ -1297,10 +1291,7 @@ void Controller::solveIP()
 		cout << "Error, solveCG must generate columns before solveIP" << endl;
 		exit(1);
 	}
-	if (!_masterProblem->solveIP())
-	{
-		exit(1);
-	}
+	_masterProblem->solveIP();
 	_masterProblem->reportIP();
 }
 

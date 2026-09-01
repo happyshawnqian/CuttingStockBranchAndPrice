@@ -63,13 +63,13 @@ public:
 
 	// Solve the current LP relaxation and expose primal/dual information used
 	// by pricing and branching.
-	bool solve();
+	void solve();
 	vector<double> getDuals();
 	vector<double> getValues();
 	double getObjectiveValue();
 	double getArtificialUsage();
 	void report();
-	bool solveIP();
+	void solveIP();
 	void reportIP();
 
 };

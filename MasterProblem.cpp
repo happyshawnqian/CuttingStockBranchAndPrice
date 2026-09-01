@@ -120,14 +120,13 @@ void MasterProblem::addColumns(const vector<Pattern* >& patterns)
 	}
 }
 
-bool MasterProblem::solve()
+void MasterProblem::solve()
 {
 	//_cutSolver.exportModel("masterProblem.lp");
 	_cutSolver.setOut(_env.getNullStream());
 	if (!_cutSolver.solve())
 	{
 		cout << "Error, master problem could not be solved" << endl;
-		//return false;
 		exit(1);
 	}
 
@@ -135,7 +134,6 @@ bool MasterProblem::solve()
 	report();
 #endif
 
-	return true;
 }
 
 vector<double> MasterProblem::getDuals()
@@ -227,7 +225,7 @@ void MasterProblem::report()
 	cout << endl;
 }
 
-bool MasterProblem::solveIP()
+void MasterProblem::solveIP()
 {
 	// Convert the current restricted master columns to integer variables. This
 	// is not full branch-and-price; it only solves over columns already present.
@@ -239,10 +237,8 @@ bool MasterProblem::solveIP()
 	if (!_cutSolver.solve())
 	{
 		cout << "Error, integer master problem could not be solved" << endl;
-		//return false;
 		exit(1);
 	}
-	return true;
 }
 
 void MasterProblem::reportIP()
