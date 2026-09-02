@@ -19,6 +19,7 @@ private:
 	// Simple monotonic identifier used for reporting and CPLEX variable names.
 	static int _counter;
 public:
+	// Create an empty unit-cost pattern with a new reporting identifier.
 	Pattern();
 
 	void setId(int id){ _id = id; }
@@ -26,10 +27,12 @@ public:
 
 	void setContent(vector<pair<int, int>> content){ _content = content; }
 	vector<pair<int, int>> getContent(){ return _content; }
+	// Append one product-index/count entry to the sparse pattern representation.
 	void addContent(pair<int, int> content) { _content.push_back(content); }
 
 	void setCost(double cost) { _cost = cost; }
 	double getCost(){ return _cost; }
 
+	// Print the pattern identifier and every sparse product-count entry.
 	void print();
 };

@@ -2,6 +2,8 @@
 #include "Controller.h"
 using namespace std;
 
+// Load one instance from an optional directory prefix and run the default
+// Ryan-Foster branch-and-price workflow. Fatal validation errors terminate via exit().
 int main(int argc, char** argv)
 {
 	Controller controller;

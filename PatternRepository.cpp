@@ -5,16 +5,19 @@
 #include <iostream>
 #include <sstream>
 
+// Item count remains unset until reset() establishes the signature width.
 PatternRepository::PatternRepository()
 {
 	_itemCount = 0;
 }
 
+// clear() applies the repository's ownership rule to every stored Pattern.
 PatternRepository::~PatternRepository()
 {
 	clear();
 }
 
+// Start a new append-only index space whose signatures contain itemCount bits.
 void PatternRepository::reset(int itemCount)
 {
 	if (itemCount <= 0)
@@ -27,6 +30,7 @@ void PatternRepository::reset(int itemCount)
 	_itemCount = itemCount;
 }
 
+// Delete canonical Pattern objects before discarding both lookup structures.
 void PatternRepository::clear()
 {
 	for (auto pattern : _patterns)
@@ -38,6 +42,8 @@ void PatternRepository::clear()
 	_itemCount = 0;
 }
 
+// Canonicalize by binary signature. New candidates are appended once; duplicate
+// candidates are deleted and mapped to the existing stable repository index.
 PatternRepository::AddResult PatternRepository::addOrGet(Pattern* candidate)
 {
 	if (candidate == nullptr)
@@ -72,6 +78,7 @@ PatternRepository::AddResult PatternRepository::addOrGet(Pattern* candidate)
 	return result;
 }
 
+// Guard the stable-index boundary before exposing a repository-owned pointer.
 Pattern* PatternRepository::getPattern(int patternIndex) const
 {
 	if (patternIndex < 0 || patternIndex >= static_cast<int>(_patterns.size()))
@@ -88,6 +95,8 @@ int PatternRepository::size() const
 	return static_cast<int>(_patterns.size());
 }
 
+// Validate binary sparse content and serialize the full item-selection vector,
+// making signatures independent of sparse entry order and Pattern reporting ids.
 string PatternRepository::getSignature(Pattern* pattern) const
 {
 	if (_itemCount <= 0)

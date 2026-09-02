@@ -14,6 +14,7 @@ MasterProblem::MasterProblem() : Problem()
 	_integerConverted = false;
 }
 
+// Build the same empty RMP while storing non-owning views of the instance data.
 MasterProblem::MasterProblem(const vector<PaperRoll* >& materials, const vector<PaperRoll* >& products) : Problem(materials, products)
 {
 	_cutOpt = IloModel(_env, "cutStock");
@@ -25,11 +26,13 @@ MasterProblem::MasterProblem(const vector<PaperRoll* >& materials, const vector<
 	_integerConverted = false;
 }
 
+// Ending the environment releases all model, variable, constraint, and solver handles.
 MasterProblem::~MasterProblem()
 {
 	_env.end();
 }
 
+// Create one equality row per expanded unit-demand product; columns are added later.
 void MasterProblem::initialize()
 {
 	int nWdth = static_cast<int>(_products.size());	// number of unit-demand items
@@ -75,6 +78,7 @@ void MasterProblem::addArtificialColumns(double cost)
 	}
 }
 
+// Delegate to the bounded overload using the standard nonnegative continuous domain.
 void MasterProblem::addColumn(Pattern* pattern)
 {
 	addColumn(pattern, 0, IloInfinity);
@@ -112,6 +116,7 @@ void MasterProblem::addColumn(Pattern* pattern, double lowerBound, double upperB
 	col.end();
 }
 
+// Preserve caller order while applying the standard bounds to each pattern.
 void MasterProblem::addColumns(const vector<Pattern* >& patterns)
 {
 	for (auto pattern : patterns)
@@ -120,6 +125,8 @@ void MasterProblem::addColumns(const vector<Pattern* >& patterns)
 	}
 }
 
+// Suppress normal CPLEX output and fail fast because all controller-created RMPs
+// have a feasible basis from singleton or artificial columns.
 void MasterProblem::solve()
 {
 	//_cutSolver.exportModel("masterProblem.lp");
@@ -167,6 +174,7 @@ double MasterProblem::getObjectiveValue()
 
 double MasterProblem::getArtificialUsage()
 {
+	// Summing identity-column values measures total uncovered demand in the real RMP.
 	double usage = 0;
 	for (int j = 0; j < _Artificial.getSize(); j++)
 	{
@@ -177,6 +185,7 @@ double MasterProblem::getArtificialUsage()
 
 void MasterProblem::report()
 {
+	// Keep local column diagnostics together with the exact-cover duals used by pricing.
 	cout << "Master Problem report after solved" << endl;
 	cout << "Using " << _cutSolver.getObjValue()
 		<< " rolls" << endl;
@@ -243,6 +252,7 @@ void MasterProblem::solveIP()
 
 void MasterProblem::reportIP()
 {
+	// The integer report uses local RMP column positions because it is diagnostic only.
 	cout << endl;
 	cout << "Best integer solution uses "
 		<< _cutSolver.getObjValue() << " rolls" << endl;

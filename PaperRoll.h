@@ -23,6 +23,8 @@ private:
 	static int _counter;
 
 public:
+	// Create a material or product record with a new reporting identifier,
+	// default unit cost, and no source/copy metadata.
 	PaperRoll(int width, int number, bool isMaterial);
 
 	void setId(int id) { _id = id; }

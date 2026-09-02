@@ -13,8 +13,11 @@ protected:
 	vector<PaperRoll* > _materials;
 	vector<PaperRoll* > _products;
 public:
+	// Create an empty, non-owning view of materials and products.
 	Problem(){}
+// Destroy the view without deleting rolls owned by Controller or an external caller.
 	virtual ~Problem() {}
+	// Create a non-owning view over the supplied material and product vectors.
 	Problem(const vector<PaperRoll* >& materials, const vector<PaperRoll* >& products) :_materials(materials), _products(products)
 	{
 

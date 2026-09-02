@@ -11,6 +11,7 @@ Subproblem::Subproblem() : Problem()
 	_patSolver = IloCplex(_patGen);
 }
 
+// Ending the environment releases the pricing model and all Concert handles.
 Subproblem::~Subproblem()
 {
 	_env.end();
@@ -53,6 +54,7 @@ void Subproblem::initialize()
 	_patGen.add(_Width);
 }
 
+// Ryan-Foster constraints require two different variables from the pricing model.
 void Subproblem::validateItemPair(int firstItemIndex, int secondItemIndex) const
 {
 	int itemCount = static_cast<int>(_products.size());
@@ -125,6 +127,7 @@ void Subproblem::addExcludedPattern(Pattern* pattern)
 	differs.end();
 }
 
+// Apply the single-pattern no-good construction repeatedly to a batch.
 void Subproblem::addExcludedPatterns(const vector<Pattern* >& patterns)
 {
 	for (auto pattern : patterns)
@@ -154,11 +157,14 @@ void Subproblem::setObjective(const vector<double>& duals)
 	objExp.end();
 }
 
+// The default overload treats any pricing failure as an unrecoverable solver error.
 bool Subproblem::solve()
 {
 	return solve(true);
 }
 
+// Re-optimize the current binary pricing model after clearing stale MIP starts;
+// callers may suppress fatal reporting when exhaustion is an expected outcome.
 bool Subproblem::solve(bool reportFailure)
 {
 	//_patSolver.exportModel("subproblem.lp");

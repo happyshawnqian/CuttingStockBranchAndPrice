@@ -43,8 +43,11 @@ private:
 	bool _integerConverted;
 
 public:
+	// Create an empty restricted master whose rows and columns are added later.
 	MasterProblem();
+	// Create an empty restricted master that references the supplied instance data.
 	MasterProblem(const vector<PaperRoll* >& materials, const vector<PaperRoll* >& products);
+	// Release the CPLEX environment and every Concert object created from it.
 	~MasterProblem();
 
 	MasterProblem(const MasterProblem&) = delete;
@@ -57,19 +60,31 @@ public:
 	// pricing searches for real columns.
 	void addArtificialColumns(double cost);
 
-	void addColumn(Pattern* pattern);	// add one column
+	// Add one nonnegative real pattern variable with no explicit upper bound.
+	void addColumn(Pattern* pattern);
+	// Add one real pattern variable with explicit bounds after validating that
+	// the pattern is a non-duplicated binary subset of the product rows.
 	void addColumn(Pattern* pattern, double lowerBound, double upperBound);
-	void addColumns(const vector<Pattern* >& patterns);	// add many columns
+	// Add each supplied pattern with the default nonnegative variable bounds.
+	void addColumns(const vector<Pattern* >& patterns);
 
-	// Solve the current LP relaxation and expose primal/dual information used
-	// by pricing and branching.
+	// Solve the current LP relaxation. Solver failure is fatal because controller
+	// paths construct masters that are feasible by singleton or artificial columns.
 	void solve();
+	// Return exact-cover row duals in product-index order for pricing.
 	vector<double> getDuals();
+	// Return only real pattern values in local RMP column order.
 	vector<double> getValues();
 	double getObjectiveValue();
+	// Return total artificial-column usage; positive usage after exact pricing
+	// proves that the node has no feasible solution using real patterns.
 	double getArtificialUsage();
+	// Print the LP objective, pattern values, reduced costs, bounds, and row duals.
 	void report();
+	// Convert all current real pattern variables to binary and solve the restricted
+	// integer master. This does not generate additional columns.
 	void solveIP();
+	// Print the restricted integer-master objective and pattern values.
 	void reportIP();
 
 };

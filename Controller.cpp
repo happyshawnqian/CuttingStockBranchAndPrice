@@ -6,6 +6,7 @@
 
 int BPNode::_counter = 0;
 
+// Initialize a root-level node with no branch path, columns, or LP certificate.
 BPNode::BPNode()
 {
 	_id = _counter;
@@ -19,6 +20,7 @@ BPNode::BPNode()
 	_hasExactPricingCertificate = false;
 }
 
+// Initialize a node at a caller-supplied depth; pricing state starts invalid.
 BPNode::BPNode(int depth)
 {
 	_id = _counter;
@@ -32,6 +34,8 @@ BPNode::BPNode(int depth)
 	_hasExactPricingCertificate = false;
 }
 
+// Canonicalize and append a branch decision, then discard the LP state that was
+// certified for the previous feasible pattern space.
 void BPNode::addRyanFosterConstraint(int firstItemIndex, int secondItemIndex,
 	RyanFosterBranchType branchType)
 {
@@ -76,6 +80,7 @@ void BPNode::addRyanFosterConstraint(int firstItemIndex, int secondItemIndex,
 	_hasExactPricingCertificate = false;
 }
 
+// Replacing the local RMP column set invalidates all values and pricing counts.
 void BPNode::setActivePatternIndices(const vector<int>& activePatternIndices)
 {
 	_activePatternIndices = activePatternIndices;
@@ -88,6 +93,8 @@ void BPNode::setActivePatternIndices(const vector<int>& activePatternIndices)
 	_hasExactPricingCertificate = false;
 }
 
+// Commit one completed pricing result atomically so the active-index vector and
+// primal-value vector always share the same local column order.
 void BPNode::setExactEvaluation(const vector<int>& activePatternIndices,
 	const vector<double>& values, double objective, int sequence,
 	int poolColumnCount, int exactColumnCount, int exactSolveCount)
@@ -164,6 +171,8 @@ bool BPNode::hasExactPricingCertificate() const
 	return _hasExactPricingCertificate;
 }
 
+// Moving a node to another level changes its position in the search ordering,
+// so any previous evaluation must be recomputed before queue insertion.
 void BPNode::setDepth(int depth)
 {
 	_depth = depth;
@@ -176,6 +185,8 @@ void BPNode::setDepth(int depth)
 	_hasExactPricingCertificate = false;
 }
 
+// priority_queue treats a node as lower priority when this comparator returns
+// true, producing a min-objective best-first frontier with deterministic ties.
 bool BPNodeCompare::operator()(const BPNode& left, const BPNode& right) const
 {
 	if (!left.hasExactPricingCertificate()
@@ -362,6 +373,7 @@ void Controller::clearProducts(bool clearProblemVector)
 
 void Controller::clearPatterns()
 {
+	// PatternRepository owns every generated Pattern and clears its signature map.
 	_patternRepository.clear();
 }
 
@@ -417,6 +429,7 @@ void Controller::validateProblemReady()
 
 bool Controller::patternContainsItem(Pattern* pattern, int itemIndex) const
 {
+	// Pattern content is sparse, so membership requires scanning stored entries.
 	if (pattern == nullptr)
 	{
 		return false;
@@ -476,6 +489,7 @@ void Controller::applyRyanFosterConstraints(const BPNode& node, Subproblem& subp
 
 string Controller::getItemDescription(int itemIndex) const
 {
+	// Include source/copy metadata so logs distinguish expanded identical demands.
 	ostringstream description;
 	description << "item " << itemIndex;
 
@@ -493,6 +507,8 @@ string Controller::getItemDescription(int itemIndex) const
 double Controller::getPatternReducedCost(Pattern* pattern,
 	const vector<double>& duals) const
 {
+	// Pool pricing evaluates an existing column with the same reduced-cost
+	// formula used as the exact pricing objective.
 	if (pattern == nullptr
 		|| duals.size() != _problem->getProducts().size())
 	{
@@ -518,6 +534,7 @@ void Controller::addActiveColumnToMaster(int repositoryIndex,
 	MasterProblem& master, vector<int>& localToGlobalPatternIndices,
 	unordered_set<int>& activePatternIndices) const
 {
+	// Update the CPLEX model, ordered reverse mapping, and membership set together.
 	if (activePatternIndices.find(repositoryIndex) != activePatternIndices.end())
 	{
 		cout << "Error, duplicate active global pattern index "
@@ -536,6 +553,8 @@ int Controller::addNegativePoolColumns(const BPNode& node,
 	vector<int>& localToGlobalPatternIndices,
 	unordered_set<int>& activePatternIndices) const
 {
+	// Scan the append-only repository snapshot and activate all improving known
+	// columns before paying for another exact pricing solve.
 	int addedColumnCount = 0;
 	int repositorySize = _patternRepository.size();
 	for (int repositoryIndex = 0;
@@ -565,6 +584,7 @@ int Controller::addNegativePoolColumns(const BPNode& node,
 void Controller::validateActivePatternIndices(const BPNode& node,
 	const vector<int>& activePatternIndices) const
 {
+	// Revalidate both uniqueness and branch compatibility at every RMP boundary.
 	unordered_set<int> uniqueIndices;
 	for (auto repositoryIndex : activePatternIndices)
 	{
@@ -590,6 +610,7 @@ void Controller::validateActivePatternIndices(const BPNode& node,
 
 void Controller::requireExactPricingCertificate(const BPNode& node) const
 {
+	// Uncertified objectives cannot participate in pruning or global-bound logic.
 	if (!node.hasExactPricingCertificate())
 	{
 		cout << "Error, node id " << node.getId()
@@ -717,6 +738,7 @@ bool Controller::solveColumnGenerationAtNode(BPNode& node)
 
 bool Controller::isIntegerPatternSolution(const vector<double>& values) const
 {
+	// Compare each continuous RMP value with its nearest integer using RC_EPS.
 	for (auto value : values)
 	{
 		double roundedValue = floor(value + 0.5);
@@ -730,6 +752,8 @@ bool Controller::isIntegerPatternSolution(const vector<double>& values) const
 
 bool Controller::findRyanFosterPair(const BPNode& node, RyanFosterPair& pair) const
 {
+	// Derive pair-together values from positive local columns mapped back to the
+	// global repository, then choose the most balanced fractional disjunction.
 	requireExactPricingCertificate(node);
 	const vector<double>& values = node.getValues();
 	const vector<int>& activePatternIndices = node.getActivePatternIndices();
@@ -817,6 +841,9 @@ bool Controller::findRyanFosterPair(const BPNode& node, RyanFosterPair& pair) co
 
 bool Controller::evaluateBPNode(BPNode& node)
 {
+// Enforce the node budget, then exact-price so every accepted objective is a
+// valid node lower bound. Infeasible, dominated, and integer nodes are pruned;
+// only a fractional improving node is returned to the best-first frontier.
 	if (_processedBranchAndPriceNodes >= _maxBranchAndPriceNodes)
 	{
 		return false;
@@ -919,6 +946,7 @@ void Controller::createRyanFosterChildNodes(const BPNode& node, const RyanFoster
 void Controller::reportRyanFosterBranch(const BPNode& node, const RyanFosterPair& pair,
 	const BPNode& togetherNode, const BPNode& separateNode) const
 {
+	// Report expanded item identities together with both newly assigned child ids.
 	cout << "Ryan-Foster branch at node id " << node.getId() << ": "
 		<< getItemDescription(pair.firstItemIndex) << " and "
 		<< getItemDescription(pair.secondItemIndex)
@@ -948,6 +976,7 @@ bool Controller::isIntegerBoundClosed() const
 
 void Controller::reportBranchAndPriceBounds() const
 {
+	// Integer rounding is valid because every real pattern has unit roll cost.
 	double integerLowerBound = ceil(_lowerBound - Utility::BP_BOUND_EPS);
 	cout << "Global LP lower bound = " << _lowerBound
 		<< ", integer lower bound = " << integerLowerBound;
@@ -1286,6 +1315,7 @@ vector<Pattern* > Controller::findInitialPatterns()
 
 void Controller::solveIP()
 {
+	// This comparison path reuses only columns generated by standalone solveCG().
 	if (_patternRepository.size() == 0)
 	{
 		cout << "Error, solveCG must generate columns before solveIP" << endl;
