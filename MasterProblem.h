@@ -75,6 +75,14 @@ public:
 	vector<double> getDuals();
 	// Return only real pattern values in local RMP column order.
 	vector<double> getValues();
+	// Return whether each real pattern variable is basic, preserving local _Cut
+	// order. A missing basis status is treated as an internal solver error.
+	vector<bool> getBasicColumnFlags() const;
+	// Return the number of real pattern variables currently active in the RMP.
+	int getRealColumnCount() const;
+	// Remove one real pattern variable from the model and local _Cut array.
+	// Artificial variables are stored separately and cannot be removed here.
+	void removeColumn(int localColumnIndex);
 	double getObjectiveValue();
 	// Return total artificial-column usage; positive usage after exact pricing
 	// proves that the node has no feasible solution using real patterns.

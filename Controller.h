@@ -47,11 +47,13 @@ public:
 	// certificate because the stored LP values no longer describe the node.
 	void setActivePatternIndices(const vector<int>& activePatternIndices);
 
-	// Store an exact-priced RMP solution, its local-to-global column order, and
-	// pricing statistics, then mark the node objective as a valid lower bound.
+	// Store an exact-priced RMP solution, its local-to-global column order,
+	// pricing and cleanup statistics, then certify its objective as a lower bound.
 	void setExactEvaluation(const vector<int>& activePatternIndices,
 		const vector<double>& values, double objective, int sequence,
-		int poolColumnCount, int exactColumnCount, int exactSolveCount);
+		int poolColumnCount, int exactColumnCount, int exactSolveCount,
+		int columnCleanupCount, int deletedColumnCount,
+		int peakActiveColumnCount);
 
 	const vector<RyanFosterConstraint>& getRyanFosterConstraints() const;
 	// Return global repository indices in the same local order as getValues().
@@ -66,6 +68,9 @@ public:
 	int getPoolColumnCount() const;
 	int getExactColumnCount() const;
 	int getExactSolveCount() const;
+	int getColumnCleanupCount() const;
+	int getDeletedColumnCount() const;
+	int getPeakActiveColumnCount() const;
 	// Report whether the stored LP objective was finalized by exact pricing.
 	bool hasExactPricingCertificate() const;
 
@@ -91,6 +96,9 @@ private:
 	int _poolColumnCount;
 	int _exactColumnCount;
 	int _exactSolveCount;
+	int _columnCleanupCount;
+	int _deletedColumnCount;
+	int _peakActiveColumnCount;
 	bool _hasExactPricingCertificate;
 };
 
@@ -118,6 +126,13 @@ private:
 	{
 		int repositoryIndex;
 		int quantity;
+	};
+
+	struct RmpColumnState
+	{
+		int localColumnIndex;
+		int age;
+		bool isBasic;
 	};
 
 	// The controller coordinates data loading, column generation, and the
@@ -149,6 +164,9 @@ private:
 	int _processedBranchAndPriceNodes;
 	int _maxBranchAndPriceNodes;
 	int _nextBranchAndPriceSequence;
+	int _rmpColumnLimitMultiplier;
+	int _minRmpColumnAge;
+	int _minRmpSolvesBetweenCleanups;
 
 	// Global, append-only repository shared by all branch-and-price nodes.
 	PatternRepository _patternRepository;
@@ -178,16 +196,38 @@ private:
 
 	// Compute a repository pattern's reduced cost from current master duals.
 	double getPatternReducedCost(Pattern* pattern, const vector<double>& duals) const;
-	// Add one global repository pattern to the local RMP and update both mapping
-	// containers. Duplicate activation is treated as an internal error.
+	// Add one global repository pattern to the local RMP with age zero and update
+	// both mapping containers. Duplicate activation is an internal error.
 	void addActiveColumnToMaster(int repositoryIndex, MasterProblem& master,
 		vector<int>& localToGlobalPatternIndices,
-		unordered_set<int>& activePatternIndices) const;
+		unordered_set<int>& activePatternIndices,
+		vector<int>& columnAges) const;
 	// Activate every inactive, node-compatible repository pattern with negative
 	// reduced cost and return the number of local columns added.
 	int addNegativePoolColumns(const BPNode& node, const vector<double>& duals,
 		MasterProblem& master, vector<int>& localToGlobalPatternIndices,
-		unordered_set<int>& activePatternIndices) const;
+		unordered_set<int>& activePatternIndices,
+		vector<int>& columnAges) const;
+	// Verify that the master, ordered mapping, membership set, and age vector
+	// describe exactly the same active real columns.
+	void validateLocalColumnState(const MasterProblem& master,
+		const vector<int>& localToGlobalPatternIndices,
+		const unordered_set<int>& activePatternIndices,
+		const vector<int>& columnAges) const;
+	// Reset basic-column ages and increment every valid nonbasic-column age.
+	// Return the basis flags used by the current cleanup decision.
+	vector<bool> updateColumnAges(const MasterProblem& master,
+		vector<int>& columnAges) const;
+	// Remove up to one row count of the oldest eligible nonbasic columns while
+	// preserving all corresponding patterns in the global repository.
+	int removeAgedColumnsFromMaster(MasterProblem& master,
+		const vector<bool>& basicColumnFlags,
+		vector<int>& localToGlobalPatternIndices,
+		unordered_set<int>& activePatternIndices,
+		vector<int>& columnAges) const;
+	// Sort older RMP columns first, breaking equal ages by local index.
+	static bool olderRmpColumnFirst(const RmpColumnState& left,
+		const RmpColumnState& right);
 	// Verify that active indices are unique, valid, and branch compatible.
 	void validateActivePatternIndices(const BPNode& node,
 		const vector<int>& activePatternIndices) const;
@@ -238,6 +278,12 @@ public:
 	// state; previously generated patterns and owned input data are discarded.
 	void setProblem(Problem* problem);
 	Problem* getProblem() { return _problem; }
+	// Configure the active real-column limit as a multiple of master row count.
+	void setRmpColumnLimitMultiplier(int multiplier);
+	// Configure the minimum nonbasic age required for column deletion.
+	void setMinRmpColumnAge(int minAge);
+	// Configure the number of successful RMP solves required between cleanups.
+	void setMinRmpSolvesBetweenCleanups(int solveCount);
 
 	// Load and own raw-roll records from dataFile + "materials.json", where
 	// dataFile is an optional directory prefix.

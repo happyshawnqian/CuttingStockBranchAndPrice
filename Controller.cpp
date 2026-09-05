@@ -1,6 +1,8 @@
 #include "Controller.h"
+#include <algorithm>
 #include <cstdlib>
 #include <cmath>
+#include <functional>
 #include <queue>
 #include <sstream>
 
@@ -17,6 +19,9 @@ BPNode::BPNode()
 	_poolColumnCount = 0;
 	_exactColumnCount = 0;
 	_exactSolveCount = 0;
+	_columnCleanupCount = 0;
+	_deletedColumnCount = 0;
+	_peakActiveColumnCount = 0;
 	_hasExactPricingCertificate = false;
 }
 
@@ -31,6 +36,9 @@ BPNode::BPNode(int depth)
 	_poolColumnCount = 0;
 	_exactColumnCount = 0;
 	_exactSolveCount = 0;
+	_columnCleanupCount = 0;
+	_deletedColumnCount = 0;
+	_peakActiveColumnCount = 0;
 	_hasExactPricingCertificate = false;
 }
 
@@ -77,6 +85,9 @@ void BPNode::addRyanFosterConstraint(int firstItemIndex, int secondItemIndex,
 	_poolColumnCount = 0;
 	_exactColumnCount = 0;
 	_exactSolveCount = 0;
+	_columnCleanupCount = 0;
+	_deletedColumnCount = 0;
+	_peakActiveColumnCount = 0;
 	_hasExactPricingCertificate = false;
 }
 
@@ -90,6 +101,9 @@ void BPNode::setActivePatternIndices(const vector<int>& activePatternIndices)
 	_poolColumnCount = 0;
 	_exactColumnCount = 0;
 	_exactSolveCount = 0;
+	_columnCleanupCount = 0;
+	_deletedColumnCount = 0;
+	_peakActiveColumnCount = 0;
 	_hasExactPricingCertificate = false;
 }
 
@@ -97,7 +111,9 @@ void BPNode::setActivePatternIndices(const vector<int>& activePatternIndices)
 // primal-value vector always share the same local column order.
 void BPNode::setExactEvaluation(const vector<int>& activePatternIndices,
 	const vector<double>& values, double objective, int sequence,
-	int poolColumnCount, int exactColumnCount, int exactSolveCount)
+	int poolColumnCount, int exactColumnCount, int exactSolveCount,
+	int columnCleanupCount, int deletedColumnCount,
+	int peakActiveColumnCount)
 {
 	if (activePatternIndices.size() != values.size())
 	{
@@ -113,6 +129,9 @@ void BPNode::setExactEvaluation(const vector<int>& activePatternIndices,
 	_poolColumnCount = poolColumnCount;
 	_exactColumnCount = exactColumnCount;
 	_exactSolveCount = exactSolveCount;
+	_columnCleanupCount = columnCleanupCount;
+	_deletedColumnCount = deletedColumnCount;
+	_peakActiveColumnCount = peakActiveColumnCount;
 	_hasExactPricingCertificate = true;
 }
 
@@ -166,6 +185,21 @@ int BPNode::getExactSolveCount() const
 	return _exactSolveCount;
 }
 
+int BPNode::getColumnCleanupCount() const
+{
+	return _columnCleanupCount;
+}
+
+int BPNode::getDeletedColumnCount() const
+{
+	return _deletedColumnCount;
+}
+
+int BPNode::getPeakActiveColumnCount() const
+{
+	return _peakActiveColumnCount;
+}
+
 bool BPNode::hasExactPricingCertificate() const
 {
 	return _hasExactPricingCertificate;
@@ -182,6 +216,9 @@ void BPNode::setDepth(int depth)
 	_poolColumnCount = 0;
 	_exactColumnCount = 0;
 	_exactSolveCount = 0;
+	_columnCleanupCount = 0;
+	_deletedColumnCount = 0;
+	_peakActiveColumnCount = 0;
 	_hasExactPricingCertificate = false;
 }
 
@@ -234,6 +271,9 @@ Controller::Controller()
 	_processedBranchAndPriceNodes = 0;
 	_maxBranchAndPriceNodes = 1000;
 	_nextBranchAndPriceSequence = 0;
+	_rmpColumnLimitMultiplier = 3;
+	_minRmpColumnAge = 1;
+	_minRmpSolvesBetweenCleanups = 5;
 }
 
 Controller::Controller(Problem* problem)
@@ -256,6 +296,9 @@ Controller::Controller(Problem* problem)
 	_processedBranchAndPriceNodes = 0;
 	_maxBranchAndPriceNodes = 1000;
 	_nextBranchAndPriceSequence = 0;
+	_rmpColumnLimitMultiplier = 3;
+	_minRmpColumnAge = 1;
+	_minRmpSolvesBetweenCleanups = 5;
 
 	syncProblemToSolvers();
 }
@@ -294,6 +337,40 @@ void Controller::setProblem(Problem* problem)
 
 	resetSolvers();
 	syncProblemToSolvers();
+}
+
+void Controller::setRmpColumnLimitMultiplier(int multiplier)
+{
+	// Reject zero or negative limits because they would make every RMP oversized.
+	if (multiplier < 1)
+	{
+		cout << "Error, RMP column limit multiplier must be at least 1" << endl;
+		exit(1);
+	}
+	_rmpColumnLimitMultiplier = multiplier;
+}
+
+void Controller::setMinRmpColumnAge(int minAge)
+{
+	// Requiring a positive age protects columns that have not yet been re-solved.
+	if (minAge < 1)
+	{
+		cout << "Error, minimum RMP column age must be at least 1" << endl;
+		exit(1);
+	}
+	_minRmpColumnAge = minAge;
+}
+
+void Controller::setMinRmpSolvesBetweenCleanups(int solveCount)
+{
+	// A positive cooldown prevents repeated deletion after the same LP solve.
+	if (solveCount < 1)
+	{
+		cout << "Error, minimum RMP solves between cleanups must be at least 1"
+			<< endl;
+		exit(1);
+	}
+	_minRmpSolvesBetweenCleanups = solveCount;
 }
 
 void Controller::syncProblemToSolvers()
@@ -532,9 +609,10 @@ double Controller::getPatternReducedCost(Pattern* pattern,
 
 void Controller::addActiveColumnToMaster(int repositoryIndex,
 	MasterProblem& master, vector<int>& localToGlobalPatternIndices,
-	unordered_set<int>& activePatternIndices) const
+	unordered_set<int>& activePatternIndices, vector<int>& columnAges) const
 {
-	// Update the CPLEX model, ordered reverse mapping, and membership set together.
+	// Update the CPLEX model, ordered reverse mapping, membership set, and age
+	// vector together. Reactivated repository columns restart at age zero.
 	if (activePatternIndices.find(repositoryIndex) != activePatternIndices.end())
 	{
 		cout << "Error, duplicate active global pattern index "
@@ -546,12 +624,13 @@ void Controller::addActiveColumnToMaster(int repositoryIndex,
 	master.addColumn(pattern);
 	localToGlobalPatternIndices.push_back(repositoryIndex);
 	activePatternIndices.insert(repositoryIndex);
+	columnAges.push_back(0);
 }
 
 int Controller::addNegativePoolColumns(const BPNode& node,
 	const vector<double>& duals, MasterProblem& master,
 	vector<int>& localToGlobalPatternIndices,
-	unordered_set<int>& activePatternIndices) const
+	unordered_set<int>& activePatternIndices, vector<int>& columnAges) const
 {
 	// Scan the append-only repository snapshot and activate all improving known
 	// columns before paying for another exact pricing solve.
@@ -574,11 +653,149 @@ int Controller::addNegativePoolColumns(const BPNode& node,
 		if (getPatternReducedCost(pattern, duals) < -Utility::RC_EPS)
 		{
 			addActiveColumnToMaster(repositoryIndex, master,
-				localToGlobalPatternIndices, activePatternIndices);
+				localToGlobalPatternIndices, activePatternIndices, columnAges);
 			addedColumnCount++;
 		}
 	}
 	return addedColumnCount;
+}
+
+void Controller::validateLocalColumnState(const MasterProblem& master,
+	const vector<int>& localToGlobalPatternIndices,
+	const unordered_set<int>& activePatternIndices,
+	const vector<int>& columnAges) const
+{
+	// Every local structure must describe one and the same ordered RMP column set.
+	int realColumnCount = master.getRealColumnCount();
+	if (realColumnCount != static_cast<int>(localToGlobalPatternIndices.size())
+		|| realColumnCount != static_cast<int>(activePatternIndices.size())
+		|| realColumnCount != static_cast<int>(columnAges.size()))
+	{
+		cout << "Error, local master column state has inconsistent sizes" << endl;
+		exit(1);
+	}
+
+	for (int repositoryIndex : localToGlobalPatternIndices)
+	{
+		if (activePatternIndices.find(repositoryIndex)
+			== activePatternIndices.end())
+		{
+			cout << "Error, local-to-global pattern mapping is missing from the "
+				<< "active membership set" << endl;
+			exit(1);
+		}
+	}
+}
+
+vector<bool> Controller::updateColumnAges(const MasterProblem& master,
+	vector<int>& columnAges) const
+{
+	// A basic column remains active at age zero. Every other valid basis status
+	// counts as one more consecutive solve in which the column was nonbasic.
+	vector<bool> basicColumnFlags = master.getBasicColumnFlags();
+	if (basicColumnFlags.size() != columnAges.size())
+	{
+		cout << "Error, master basis flags do not match RMP column ages" << endl;
+		exit(1);
+	}
+
+	for (int localColumnIndex = 0;
+		localColumnIndex < static_cast<int>(columnAges.size());
+		localColumnIndex++)
+	{
+		if (basicColumnFlags[localColumnIndex])
+		{
+			columnAges[localColumnIndex] = 0;
+		}
+		else
+		{
+			columnAges[localColumnIndex]++;
+		}
+	}
+	return basicColumnFlags;
+}
+
+bool Controller::olderRmpColumnFirst(const RmpColumnState& left,
+	const RmpColumnState& right)
+{
+	if (left.age != right.age)
+	{
+		return left.age > right.age;
+	}
+	return left.localColumnIndex < right.localColumnIndex;
+}
+
+int Controller::removeAgedColumnsFromMaster(MasterProblem& master,
+	const vector<bool>& basicColumnFlags,
+	vector<int>& localToGlobalPatternIndices,
+	unordered_set<int>& activePatternIndices,
+	vector<int>& columnAges) const
+{
+	validateLocalColumnState(master, localToGlobalPatternIndices,
+		activePatternIndices, columnAges);
+	if (basicColumnFlags.size() != columnAges.size())
+	{
+		cout << "Error, cleanup basis flags do not match active RMP columns" << endl;
+		exit(1);
+	}
+
+	int rowCount = static_cast<int>(_problem->getProducts().size());
+	long long columnLimit = static_cast<long long>(_rmpColumnLimitMultiplier)
+		* rowCount;
+	if (master.getRealColumnCount() < columnLimit)
+	{
+		return 0;
+	}
+
+	// Rank every active column deterministically, then skip basic or too-young
+	// entries while selecting at most one master row count for deletion.
+	vector<RmpColumnState> columnStates;
+	for (int localColumnIndex = 0;
+		localColumnIndex < master.getRealColumnCount(); localColumnIndex++)
+	{
+		RmpColumnState state;
+		state.localColumnIndex = localColumnIndex;
+		state.age = columnAges[localColumnIndex];
+		state.isBasic = basicColumnFlags[localColumnIndex];
+		columnStates.push_back(state);
+	}
+	std::sort(columnStates.begin(), columnStates.end(), olderRmpColumnFirst);
+
+	vector<int> selectedLocalIndices;
+	for (const RmpColumnState& state : columnStates)
+	{
+		if (state.isBasic || state.age < _minRmpColumnAge)
+		{
+			continue;
+		}
+		selectedLocalIndices.push_back(state.localColumnIndex);
+		if (static_cast<int>(selectedLocalIndices.size()) >= rowCount)
+		{
+			break;
+		}
+	}
+
+	// Descending local indices keep every not-yet-deleted vector position valid.
+	std::sort(selectedLocalIndices.begin(), selectedLocalIndices.end(),
+		std::greater<int>());
+	for (int localColumnIndex : selectedLocalIndices)
+	{
+		int repositoryIndex = localToGlobalPatternIndices[localColumnIndex];
+		if (activePatternIndices.erase(repositoryIndex) != 1)
+		{
+			cout << "Error, deleted RMP column is missing from the active set" << endl;
+			exit(1);
+		}
+
+		master.removeColumn(localColumnIndex);
+		localToGlobalPatternIndices.erase(
+			localToGlobalPatternIndices.begin() + localColumnIndex);
+		columnAges.erase(columnAges.begin() + localColumnIndex);
+	}
+
+	validateLocalColumnState(master, localToGlobalPatternIndices,
+		activePatternIndices, columnAges);
+	return static_cast<int>(selectedLocalIndices.size());
 }
 
 void Controller::validateActivePatternIndices(const BPNode& node,
@@ -633,11 +850,14 @@ bool Controller::solveColumnGenerationAtNode(BPNode& node)
 	validateActivePatternIndices(node, node.getActivePatternIndices());
 	vector<int> localToGlobalPatternIndices;
 	unordered_set<int> activePatternIndices;
+	vector<int> columnAges;
 	for (auto repositoryIndex : node.getActivePatternIndices())
 	{
 		addActiveColumnToMaster(repositoryIndex, master,
-			localToGlobalPatternIndices, activePatternIndices);
+			localToGlobalPatternIndices, activePatternIndices, columnAges);
 	}
+	validateLocalColumnState(master, localToGlobalPatternIndices,
+		activePatternIndices, columnAges);
 
 	Subproblem subproblem;
 	subproblem.setMaterials(_problem->getMaterials());
@@ -648,17 +868,47 @@ bool Controller::solveColumnGenerationAtNode(BPNode& node)
 	int poolColumnCount = 0;
 	int exactColumnCount = 0;
 	int exactSolveCount = 0;
+	int columnCleanupCount = 0;
+	int deletedColumnCount = 0;
+	int peakActiveColumnCount = master.getRealColumnCount();
+	int rmpSolvesSinceCleanup = 0;
 
 	while (true)
 	{
+		validateLocalColumnState(master, localToGlobalPatternIndices,
+			activePatternIndices, columnAges);
 		master.solve();
+		rmpSolvesSinceCleanup++;
+
+		vector<bool> basicColumnFlags = updateColumnAges(master, columnAges);
+		bool cleanupAllowed = columnCleanupCount == 0
+			|| rmpSolvesSinceCleanup >= _minRmpSolvesBetweenCleanups;
+		if (cleanupAllowed)
+		{
+			int removedColumnCount = removeAgedColumnsFromMaster(master,
+				basicColumnFlags, localToGlobalPatternIndices,
+				activePatternIndices, columnAges);
+			if (removedColumnCount > 0)
+			{
+				columnCleanupCount++;
+				deletedColumnCount += removedColumnCount;
+				rmpSolvesSinceCleanup = 0;
+				// The previous solution and basis refer to deleted variables. Re-solve
+				// before obtaining duals or performing either pricing phase.
+				continue;
+			}
+		}
 
 		vector<double> duals = master.getDuals();
 		int poolColumnsAdded = addNegativePoolColumns(node, duals, master,
-			localToGlobalPatternIndices, activePatternIndices);
+			localToGlobalPatternIndices, activePatternIndices, columnAges);
 		if (poolColumnsAdded > 0)
 		{
 			poolColumnCount += poolColumnsAdded;
+			peakActiveColumnCount = std::max(peakActiveColumnCount,
+				master.getRealColumnCount());
+			validateLocalColumnState(master, localToGlobalPatternIndices,
+				activePatternIndices, columnAges);
 			continue;
 		}
 
@@ -706,13 +956,19 @@ bool Controller::solveColumnGenerationAtNode(BPNode& node)
 		}
 
 		addActiveColumnToMaster(addResult.patternIndex, master,
-			localToGlobalPatternIndices, activePatternIndices);
+			localToGlobalPatternIndices, activePatternIndices, columnAges);
+		peakActiveColumnCount = std::max(peakActiveColumnCount,
+			master.getRealColumnCount());
+		validateLocalColumnState(master, localToGlobalPatternIndices,
+			activePatternIndices, columnAges);
 		if (addResult.inserted)
 		{
 			exactColumnCount++;
 		}
 	}
 
+	validateLocalColumnState(master, localToGlobalPatternIndices,
+		activePatternIndices, columnAges);
 	vector<double> values = master.getValues();
 	if (values.size() != localToGlobalPatternIndices.size())
 	{
@@ -731,7 +987,8 @@ bool Controller::solveColumnGenerationAtNode(BPNode& node)
 
 	node.setExactEvaluation(localToGlobalPatternIndices, values,
 		master.getObjectiveValue(), _nextBranchAndPriceSequence,
-		poolColumnCount, exactColumnCount, exactSolveCount);
+		poolColumnCount, exactColumnCount, exactSolveCount,
+		columnCleanupCount, deletedColumnCount, peakActiveColumnCount);
 	_nextBranchAndPriceSequence++;
 	return true;
 }
@@ -865,6 +1122,9 @@ bool Controller::evaluateBPNode(BPNode& node)
 		<< ", pool activations = " << node.getPoolColumnCount()
 		<< ", exact generated = " << node.getExactColumnCount()
 		<< ", exact solves = " << node.getExactSolveCount()
+		<< ", column cleanups = " << node.getColumnCleanupCount()
+		<< ", deleted columns = " << node.getDeletedColumnCount()
+		<< ", peak active columns = " << node.getPeakActiveColumnCount()
 		<< ", exact pricing = complete" << endl;
 
 	if (objective >= _bestObjective - Utility::RC_EPS)

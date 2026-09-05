@@ -167,6 +167,51 @@ vector<double> MasterProblem::getValues()
 	return values;
 }
 
+vector<bool> MasterProblem::getBasicColumnFlags() const
+{
+	// Basis flags use the same local order as values and the controller's
+	// local-to-global mapping. Only a valid post-solve basis may drive aging.
+	vector<bool> basicColumnFlags;
+	for (int j = 0; j < _Cut.getSize(); j++)
+	{
+		IloCplex::BasisStatus status = _cutSolver.getBasisStatus(_Cut[j]);
+		if (status == IloCplex::NotABasicStatus)
+		{
+			cout << "Error, master pattern variable has no valid basis status" << endl;
+			exit(1);
+		}
+		basicColumnFlags.push_back(status == IloCplex::Basic);
+	}
+	return basicColumnFlags;
+}
+
+int MasterProblem::getRealColumnCount() const
+{
+	return static_cast<int>(_Cut.getSize());
+}
+
+void MasterProblem::removeColumn(int localColumnIndex)
+{
+	// Column deletion is supported only while the restricted master is an LP.
+	// Removing the model extractable leaves artificial variables untouched.
+	if (_integerConverted)
+	{
+		cout << "Error, cannot remove a column after integer conversion" << endl;
+		exit(1);
+	}
+	if (localColumnIndex < 0 || localColumnIndex >= _Cut.getSize())
+	{
+		cout << "Error, invalid local master column index "
+			<< localColumnIndex << endl;
+		exit(1);
+	}
+
+	IloNumVar removedColumn = _Cut[localColumnIndex];
+	_cutOpt.remove(removedColumn);
+	_Cut.remove(localColumnIndex);
+	removedColumn.end();
+}
+
 double MasterProblem::getObjectiveValue()
 {
 	return _cutSolver.getObjValue();
