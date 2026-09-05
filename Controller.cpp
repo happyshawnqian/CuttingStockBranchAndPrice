@@ -272,6 +272,7 @@ Controller::Controller()
 	_maxBranchAndPriceNodes = 1000;
 	_nextBranchAndPriceSequence = 0;
 	_rmpColumnLimitMultiplier = 3;
+	_rmpColumnDeletionBatchMultiplier = 1.0;
 	_minRmpColumnAge = 1;
 	_minRmpSolvesBetweenCleanups = 5;
 }
@@ -297,6 +298,7 @@ Controller::Controller(Problem* problem)
 	_maxBranchAndPriceNodes = 1000;
 	_nextBranchAndPriceSequence = 0;
 	_rmpColumnLimitMultiplier = 3;
+	_rmpColumnDeletionBatchMultiplier = 1.0;
 	_minRmpColumnAge = 1;
 	_minRmpSolvesBetweenCleanups = 5;
 
@@ -348,6 +350,18 @@ void Controller::setRmpColumnLimitMultiplier(int multiplier)
 		exit(1);
 	}
 	_rmpColumnLimitMultiplier = multiplier;
+}
+
+void Controller::setRmpColumnDeletionBatchMultiplier(double multiplier)
+{
+	// A finite positive ratio gives every nonempty RMP a meaningful batch size.
+	if (!std::isfinite(multiplier) || multiplier <= 0)
+	{
+		cout << "Error, RMP column deletion batch multiplier must be finite and positive"
+			<< endl;
+		exit(1);
+	}
+	_rmpColumnDeletionBatchMultiplier = multiplier;
 }
 
 void Controller::setMinRmpColumnAge(int minAge)
@@ -746,9 +760,21 @@ int Controller::removeAgedColumnsFromMaster(MasterProblem& master,
 	{
 		return 0;
 	}
+	int activeRealColumnCount = master.getRealColumnCount();
+	double scaledDeletionLimit = std::ceil(
+		_rmpColumnDeletionBatchMultiplier * rowCount);
+	int maxColumnsToDelete = activeRealColumnCount;
+	if (scaledDeletionLimit < activeRealColumnCount)
+	{
+		maxColumnsToDelete = static_cast<int>(scaledDeletionLimit);
+	}
+	if (maxColumnsToDelete < 1)
+	{
+		maxColumnsToDelete = 1;
+	}
 
 	// Rank every active column deterministically, then skip basic or too-young
-	// entries while selecting at most one master row count for deletion.
+	// entries while selecting at most the configured row-count multiple.
 	vector<RmpColumnState> columnStates;
 	for (int localColumnIndex = 0;
 		localColumnIndex < master.getRealColumnCount(); localColumnIndex++)
@@ -769,7 +795,7 @@ int Controller::removeAgedColumnsFromMaster(MasterProblem& master,
 			continue;
 		}
 		selectedLocalIndices.push_back(state.localColumnIndex);
-		if (static_cast<int>(selectedLocalIndices.size()) >= rowCount)
+		if (static_cast<int>(selectedLocalIndices.size()) >= maxColumnsToDelete)
 		{
 			break;
 		}

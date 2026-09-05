@@ -164,7 +164,10 @@ private:
 	int _processedBranchAndPriceNodes;
 	int _maxBranchAndPriceNodes;
 	int _nextBranchAndPriceSequence;
+	// Trigger cleanup when the active RMP reaches this multiple of its row count.
 	int _rmpColumnLimitMultiplier;
+	// Delete at most this multiple of the row count during one cleanup.
+	double _rmpColumnDeletionBatchMultiplier;
 	int _minRmpColumnAge;
 	int _minRmpSolvesBetweenCleanups;
 
@@ -218,8 +221,8 @@ private:
 	// Return the basis flags used by the current cleanup decision.
 	vector<bool> updateColumnAges(const MasterProblem& master,
 		vector<int>& columnAges) const;
-	// Remove up to one row count of the oldest eligible nonbasic columns while
-	// preserving all corresponding patterns in the global repository.
+	// Remove the configured row-count multiple of the oldest eligible nonbasic
+	// columns while preserving all corresponding patterns in the repository.
 	int removeAgedColumnsFromMaster(MasterProblem& master,
 		const vector<bool>& basicColumnFlags,
 		vector<int>& localToGlobalPatternIndices,
@@ -280,6 +283,9 @@ public:
 	Problem* getProblem() { return _problem; }
 	// Configure the active real-column limit as a multiple of master row count.
 	void setRmpColumnLimitMultiplier(int multiplier);
+	// Configure the maximum columns deleted per cleanup as a positive, finite
+	// multiple of master row count. Fractional values are rounded up.
+	void setRmpColumnDeletionBatchMultiplier(double multiplier);
 	// Configure the minimum nonbasic age required for column deletion.
 	void setMinRmpColumnAge(int minAge);
 	// Configure the number of successful RMP solves required between cleanups.
